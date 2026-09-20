@@ -1,0 +1,28 @@
+.library-panel {
+  flex: 0 0 220px;
+  padding: 1rem;
+  background: #14161c;
+  border-right: 1px solid #2a2d38;
+  overflow-y: auto;
+}
+
+.library-panel__title {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #9ca3af;
+}
+
+.library-panel__empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #6b7280;
+}
+
+.library-panel__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}

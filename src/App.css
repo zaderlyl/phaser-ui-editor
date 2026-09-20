@@ -14,6 +14,12 @@
   border-bottom: 1px solid #2a2d38;
 }
 
+.app-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
 .app-main {
   flex: 1 1 auto;
   display: flex;
