@@ -5,6 +5,9 @@ const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
 const MIN_ELEMENT_SIZE = 10
 const CORNERS = ['tl', 'tr', 'bl', 'br']
+// Matches a valid JS identifier — the generated code will use this name
+// directly as a property (this.<name>), so it must be a legal one.
+const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
 // Editing surface: a real Phaser scene, so whatever renders here is pixel-identical
 // to what the exported UI will look like in the actual game.
@@ -16,6 +19,8 @@ export class EditorScene extends Phaser.Scene {
     // code generation) will read from and write to.
     this.elements = []
     this.selectedId = null
+    // Per-type counters for generating default names (panel1, panel2, ...).
+    this.typeCounters = {}
   }
 
   create() {
@@ -93,20 +98,26 @@ export class EditorScene extends Phaser.Scene {
       if (element) {
         element.props.x = dragX
         element.props.y = dragY
+        this.events.emit('elementchange', this.getElementSnapshot(element.id))
       }
 
       this.drawSelection()
     })
 
-    // Demo instance to prove the library → addElement → render pipeline works.
-    this.addElement('panel', {
-      x: width / 2,
-      y: height / 2,
-      width: 400,
-      height: 250,
-      originX: 0.5,
-      originY: 0.5,
-    })
+    // Delete/Backspace removes the selected element — but only when the
+    // keypress didn't originate from a text field (e.g. the properties
+    // panel's Nom input), since Phaser's keyboard plugin listens globally
+    // regardless of DOM focus.
+    const handleDeleteKey = (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!this.selectedId) return
+
+      event.preventDefault()
+      this.removeElement(this.selectedId)
+    }
+    this.input.keyboard.on('keydown-DELETE', handleDeleteKey)
+    this.input.keyboard.on('keydown-BACKSPACE', handleDeleteKey)
   }
 
   // Instantiates a real Phaser GameObject for the given library component type
@@ -117,7 +128,13 @@ export class EditorScene extends Phaser.Scene {
       throw new Error(`Unknown component type: "${type}"`)
     }
 
-    const gameObject = definition.create(this, props)
+    // Resolve against the component's defaults so element.props always holds
+    // the full, current set of fields (needed by e.g. the properties panel).
+    // A default name (panel1, panel2, ...) is assigned unless one was given.
+    this.typeCounters[type] = (this.typeCounters[type] ?? 0) + 1
+    const defaultName = `${type}${this.typeCounters[type]}`
+    const resolvedProps = { ...definition.defaultProps, name: defaultName, ...props }
+    const gameObject = definition.create(this, resolvedProps)
     const id = crypto.randomUUID()
     gameObject.setData('elementId', id)
     gameObject.setData('elementType', type)
@@ -126,8 +143,11 @@ export class EditorScene extends Phaser.Scene {
       this.input.setDraggable(gameObject)
     }
 
-    const element = { id, type, props, gameObject }
+    const element = { id, type, props: resolvedProps, gameObject }
+    // New elements go on top, matching most editors' default stacking.
     this.elements.push(element)
+    this.reindexDepths()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
     return element
   }
 
@@ -141,17 +161,107 @@ export class EditorScene extends Phaser.Scene {
 
     const [element] = this.elements.splice(index, 1)
     element.gameObject.destroy()
+    this.reindexDepths()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  // Reorders elements to match the given id order (back to front) and
+  // reassigns depths accordingly — used by the layers panel's drag-to-reorder.
+  reorderElements(orderedIds) {
+    const byId = new Map(this.elements.map((element) => [element.id, element]))
+    const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean)
+    if (reordered.length !== this.elements.length) return
+
+    this.elements = reordered
+    this.reindexDepths()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  // Depth follows array order (index 0 = backmost), so paint order always
+  // matches the elements list — including the layers panel's display order.
+  reindexDepths() {
+    this.elements.forEach((element, index) => element.gameObject.setDepth(index))
   }
 
   selectElement(id) {
     this.selectedId = id
     this.drawSelection()
+    this.events.emit('selectionchange', this.getElementSnapshot(id))
   }
 
   deselectElement() {
     this.selectedId = null
     this.selectionGraphics.clear()
     this.setHandlesVisible(false)
+    this.events.emit('selectionchange', null)
+  }
+
+  // Applies a partial props update (e.g. from the properties panel) to an
+  // element's GameObject, keeping props and rendered state in sync in both
+  // directions (canvas -> panel already covered by drag/resize handlers).
+  updateElementProps(id, patch) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return
+
+    Object.assign(element.props, patch)
+    const { gameObject } = element
+
+    if ('x' in patch || 'y' in patch) {
+      gameObject.setPosition(element.props.x, element.props.y)
+    }
+    if ('width' in patch || 'height' in patch) {
+      gameObject.setSize(element.props.width, element.props.height)
+    }
+    if ('color' in patch && typeof gameObject.setFillStyle === 'function') {
+      gameObject.setFillStyle(element.props.color)
+    }
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+  }
+
+  // Renames an element after validating it as a JS identifier (it becomes
+  // this.<name> in the generated code) and checking uniqueness among the
+  // other placed elements. Returns { success } or { success: false, error }
+  // so the UI can show the problem without touching the stored name.
+  renameElement(id, name) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return { success: false, error: 'Élément introuvable' }
+
+    if (!IDENTIFIER_PATTERN.test(name)) {
+      return {
+        success: false,
+        error: 'Nom invalide : lettres, chiffres, _ uniquement, sans commencer par un chiffre',
+      }
+    }
+
+    const isDuplicate = this.elements.some((el) => el.id !== id && el.props.name === name)
+    if (isDuplicate) {
+      return { success: false, error: 'Ce nom est déjà utilisé par un autre élément' }
+    }
+
+    element.props.name = name
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    return { success: true }
+  }
+
+  // Plain-object copy of an element (no GameObject reference), safe to hand
+  // to React state without aliasing issues.
+  getElementSnapshot(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return null
+    return { id: element.id, type: element.type, props: { ...element.props } }
+  }
+
+  // Plain-object copy of the full elements list, in back-to-front order —
+  // what the layers panel renders (reversed, so front is on top visually).
+  getElementsSnapshot() {
+    return this.elements.map((element) => ({
+      id: element.id,
+      type: element.type,
+      props: { ...element.props },
+    }))
   }
 
   // Resizes the selected element so the dragged corner follows the pointer
@@ -182,6 +292,7 @@ export class EditorScene extends Phaser.Scene {
     element.props.y = gameObject.y
 
     this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(element.id))
   }
 
   drawSelection() {
