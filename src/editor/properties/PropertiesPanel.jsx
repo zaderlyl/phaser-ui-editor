@@ -17,7 +17,7 @@ function hexToColorNumber(hex) {
 // identifier yet, or a duplicate), so it keeps its own draft state instead
 // of always mirroring props.name, and only commits through
 // EditorScene.renameElement when the entered name actually validates.
-export function PropertiesPanel({ element, onChange, onRename }) {
+export function PropertiesPanel({ element, onChange, onRename, onDelete }) {
   // Reset the name draft during render when the selection changes (the
   // React-documented way to adjust state from a prop change without the
   // extra render pass an effect would cost here).
@@ -116,6 +116,14 @@ export function PropertiesPanel({ element, onChange, onRename }) {
         <span className="properties-panel__group-label">Couleur</span>
         <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
       </div>
+
+      <button
+        type="button"
+        className="properties-panel__delete"
+        onClick={() => onDelete(id)}
+      >
+        Supprimer
+      </button>
     </aside>
   )
 }

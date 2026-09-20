@@ -103,6 +103,21 @@ export class EditorScene extends Phaser.Scene {
 
       this.drawSelection()
     })
+
+    // Delete/Backspace removes the selected element — but only when the
+    // keypress didn't originate from a text field (e.g. the properties
+    // panel's Nom input), since Phaser's keyboard plugin listens globally
+    // regardless of DOM focus.
+    const handleDeleteKey = (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!this.selectedId) return
+
+      event.preventDefault()
+      this.removeElement(this.selectedId)
+    }
+    this.input.keyboard.on('keydown-DELETE', handleDeleteKey)
+    this.input.keyboard.on('keydown-BACKSPACE', handleDeleteKey)
   }
 
   // Instantiates a real Phaser GameObject for the given library component type
