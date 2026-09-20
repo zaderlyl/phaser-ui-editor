@@ -6,12 +6,31 @@
 
 .app-header {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   padding: 0.75rem 1rem;
   font-family: monospace;
   font-size: 0.9rem;
   color: #e5e7eb;
   background: #14161c;
   border-bottom: 1px solid #2a2d38;
+}
+
+.app-header__export {
+  padding: 0.4rem 0.8rem;
+  background: #60a5fa;
+  border: none;
+  border-radius: 4px;
+  color: #0f1015;
+  font-family: monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.app-header__export:hover {
+  background: #7bb4fb;
 }
 
 .app-body {

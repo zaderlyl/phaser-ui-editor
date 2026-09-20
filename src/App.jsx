@@ -3,12 +3,14 @@ import { PhaserCanvas } from './editor/PhaserCanvas'
 import { LibraryPanel } from './editor/library/LibraryPanel'
 import { LayersPanel } from './editor/layers/LayersPanel'
 import { PropertiesPanel } from './editor/properties/PropertiesPanel'
+import { ExportModal } from './editor/export/ExportModal'
 import './App.css'
 
 function App() {
   const sceneRef = useRef(null)
   const [selectedElement, setSelectedElement] = useState(null)
   const [elements, setElements] = useState([])
+  const [isExportOpen, setExportOpen] = useState(false)
 
   const handleSceneReady = useCallback((scene) => {
     sceneRef.current = scene
@@ -36,7 +38,12 @@ function App() {
 
   return (
     <div className="app">
-      <header className="app-header">Phaser UI Editor</header>
+      <header className="app-header">
+        <span>Phaser UI Editor</span>
+        <button type="button" className="app-header__export" onClick={() => setExportOpen(true)}>
+          Exporter
+        </button>
+      </header>
       <div className="app-body">
         <div className="left-sidebar">
           <LibraryPanel />
@@ -62,6 +69,8 @@ function App() {
           onDelete={handleDelete}
         />
       </div>
+
+      {isExportOpen && <ExportModal elements={elements} onClose={() => setExportOpen(false)} />}
     </div>
   )
 }
