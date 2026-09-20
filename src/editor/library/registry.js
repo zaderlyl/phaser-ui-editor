@@ -1,5 +1,5 @@
+import { panelComponent } from './components/panel'
+
 // Registry of component types available in the library panel and placeable on
-// the canvas. Empty for now — concrete components (Panel, Texte, Image, ...)
-// register here later, each as:
-//   { type: 'panel', label: 'Panel', create: (scene, props) => Phaser.GameObjects.* }
-export const componentLibrary = []
+// the canvas. Each entry: { type, label, defaultProps, create(scene, props) }.
+export const componentLibrary = [panelComponent]

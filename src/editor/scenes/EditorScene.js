@@ -20,12 +20,22 @@ export class EditorScene extends Phaser.Scene {
       .setOrigin(0)
 
     this.add
-      .text(width / 2, height / 2, `Editor canvas — ${width}×${height}`, {
+      .text(8, 8, `${width}×${height}`, {
         fontFamily: 'monospace',
-        fontSize: '16px',
-        color: '#6b7280',
+        fontSize: '12px',
+        color: '#4b5563',
       })
-      .setOrigin(0.5)
+      .setOrigin(0)
+
+    // Demo instance to prove the library → addElement → render pipeline works.
+    this.addElement('panel', {
+      x: width / 2,
+      y: height / 2,
+      width: 400,
+      height: 250,
+      originX: 0.5,
+      originY: 0.5,
+    })
   }
 
   // Instantiates a real Phaser GameObject for the given library component type
