@@ -93,6 +93,7 @@ export class EditorScene extends Phaser.Scene {
       if (element) {
         element.props.x = dragX
         element.props.y = dragY
+        this.events.emit('elementchange', this.getElementSnapshot(element.id))
       }
 
       this.drawSelection()
@@ -117,7 +118,10 @@ export class EditorScene extends Phaser.Scene {
       throw new Error(`Unknown component type: "${type}"`)
     }
 
-    const gameObject = definition.create(this, props)
+    // Resolve against the component's defaults so element.props always holds
+    // the full, current set of fields (needed by e.g. the properties panel).
+    const resolvedProps = { ...definition.defaultProps, ...props }
+    const gameObject = definition.create(this, resolvedProps)
     const id = crypto.randomUUID()
     gameObject.setData('elementId', id)
     gameObject.setData('elementType', type)
@@ -126,7 +130,7 @@ export class EditorScene extends Phaser.Scene {
       this.input.setDraggable(gameObject)
     }
 
-    const element = { id, type, props, gameObject }
+    const element = { id, type, props: resolvedProps, gameObject }
     this.elements.push(element)
     return element
   }
@@ -146,12 +150,46 @@ export class EditorScene extends Phaser.Scene {
   selectElement(id) {
     this.selectedId = id
     this.drawSelection()
+    this.events.emit('selectionchange', this.getElementSnapshot(id))
   }
 
   deselectElement() {
     this.selectedId = null
     this.selectionGraphics.clear()
     this.setHandlesVisible(false)
+    this.events.emit('selectionchange', null)
+  }
+
+  // Applies a partial props update (e.g. from the properties panel) to an
+  // element's GameObject, keeping props and rendered state in sync in both
+  // directions (canvas -> panel already covered by drag/resize handlers).
+  updateElementProps(id, patch) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return
+
+    Object.assign(element.props, patch)
+    const { gameObject } = element
+
+    if ('x' in patch || 'y' in patch) {
+      gameObject.setPosition(element.props.x, element.props.y)
+    }
+    if ('width' in patch || 'height' in patch) {
+      gameObject.setSize(element.props.width, element.props.height)
+    }
+    if ('color' in patch && typeof gameObject.setFillStyle === 'function') {
+      gameObject.setFillStyle(element.props.color)
+    }
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+  }
+
+  // Plain-object copy of an element (no GameObject reference), safe to hand
+  // to React state without aliasing issues.
+  getElementSnapshot(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return null
+    return { id: element.id, type: element.type, props: { ...element.props } }
   }
 
   // Resizes the selected element so the dragged corner follows the pointer
@@ -182,6 +220,7 @@ export class EditorScene extends Phaser.Scene {
     element.props.y = gameObject.y
 
     this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(element.id))
   }
 
   drawSelection() {

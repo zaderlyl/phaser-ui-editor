@@ -11,8 +11,9 @@ const defaultProps = {
   originY: 0,
 }
 
+// addElement() always calls this with props already merged over defaultProps.
 function create(scene, props) {
-  const { x, y, width, height, color, originX, originY } = { ...defaultProps, ...props }
+  const { x, y, width, height, color, originX, originY } = props
   return scene.add.rectangle(x, y, width, height, color).setOrigin(originX, originY)
 }
 
