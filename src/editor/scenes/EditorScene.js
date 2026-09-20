@@ -2,6 +2,9 @@ import Phaser from 'phaser'
 import { componentLibrary } from '../library/registry'
 
 const SELECTION_COLOR = 0x60a5fa
+const HANDLE_SIZE = 10
+const MIN_ELEMENT_SIZE = 10
+const CORNERS = ['tl', 'tr', 'bl', 'br']
 
 // Editing surface: a real Phaser scene, so whatever renders here is pixel-identical
 // to what the exported UI will look like in the actual game.
@@ -34,8 +37,25 @@ export class EditorScene extends Phaser.Scene {
     this.selectionGraphics = this.add.graphics()
     this.selectionGraphics.setDepth(10000)
 
+    this.resizeHandles = CORNERS.map((corner) => {
+      const handle = this.add
+        .rectangle(0, 0, HANDLE_SIZE, HANDLE_SIZE, 0xffffff)
+        .setStrokeStyle(1, SELECTION_COLOR)
+        .setDepth(10001)
+        .setVisible(false)
+      handle.setData('isHandle', true)
+      handle.setData('corner', corner)
+      handle.setInteractive({ useHandCursor: true })
+      handle.input.enabled = false
+      this.input.setDraggable(handle)
+      return handle
+    })
+
     // Clicking an element selects it; clicking anything else (background) deselects.
+    // Handles are editor chrome, not selectable/deselectable targets.
     this.input.on('gameobjectdown', (_pointer, gameObject) => {
+      if (gameObject.getData('isHandle')) return
+
       const elementId = gameObject.getData('elementId')
       if (elementId) {
         this.selectElement(elementId)
@@ -44,9 +64,28 @@ export class EditorScene extends Phaser.Scene {
       }
     })
 
-    // Dragging moves the element and keeps its stored props (and the
-    // selection frame) in sync with its actual position.
+    // A handle drag starts from the corner opposite the one grabbed, so that
+    // corner stays fixed in place while the grabbed one follows the pointer.
+    this.input.on('dragstart', (_pointer, gameObject) => {
+      if (!gameObject.getData('isHandle')) return
+
+      const element = this.elements.find((el) => el.id === this.selectedId)
+      if (!element) return
+
+      const bounds = element.gameObject.getBounds()
+      const corner = gameObject.getData('corner')
+      gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
+      gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
+    })
+
     this.input.on('drag', (_pointer, gameObject, dragX, dragY) => {
+      if (gameObject.getData('isHandle')) {
+        this.resizeSelected(gameObject, dragX, dragY)
+        return
+      }
+
+      // Dragging moves the element and keeps its stored props (and the
+      // selection frame) in sync with its actual position.
       gameObject.x = dragX
       gameObject.y = dragY
 
@@ -112,15 +151,74 @@ export class EditorScene extends Phaser.Scene {
   deselectElement() {
     this.selectedId = null
     this.selectionGraphics.clear()
+    this.setHandlesVisible(false)
+  }
+
+  // Resizes the selected element so the dragged corner follows the pointer
+  // while the opposite corner (captured on dragstart) stays fixed.
+  resizeSelected(handle, dragX, dragY) {
+    const element = this.elements.find((el) => el.id === this.selectedId)
+    if (!element) return
+
+    const fixedX = handle.getData('fixedX')
+    const fixedY = handle.getData('fixedY')
+
+    const left = Math.min(fixedX, dragX)
+    const right = Math.max(fixedX, dragX)
+    const top = Math.min(fixedY, dragY)
+    const bottom = Math.max(fixedY, dragY)
+
+    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+
+    const { gameObject } = element
+    gameObject.setSize(width, height)
+    gameObject.x = left + gameObject.originX * width
+    gameObject.y = top + gameObject.originY * height
+
+    element.props.width = width
+    element.props.height = height
+    element.props.x = gameObject.x
+    element.props.y = gameObject.y
+
+    this.drawSelection()
   }
 
   drawSelection() {
     const element = this.elements.find((el) => el.id === this.selectedId)
     this.selectionGraphics.clear()
-    if (!element) return
+
+    if (!element) {
+      this.setHandlesVisible(false)
+      return
+    }
 
     const bounds = element.gameObject.getBounds()
     this.selectionGraphics.lineStyle(2, SELECTION_COLOR, 1)
     this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+
+    this.positionHandles(bounds)
+    this.setHandlesVisible(true)
+  }
+
+  positionHandles(bounds) {
+    const positions = {
+      tl: [bounds.left, bounds.top],
+      tr: [bounds.right, bounds.top],
+      bl: [bounds.left, bounds.bottom],
+      br: [bounds.right, bounds.bottom],
+    }
+
+    for (const handle of this.resizeHandles) {
+      const [x, y] = positions[handle.getData('corner')]
+      handle.setPosition(x, y)
+    }
+  }
+
+  setHandlesVisible(visible) {
+    for (const handle of this.resizeHandles) {
+      handle.setVisible(visible)
+      handle.input.enabled = visible
+    }
   }
 }
