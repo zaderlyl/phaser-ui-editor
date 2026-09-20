@@ -25,10 +25,31 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: auto;
+  overflow: hidden;
   background: #0f1015;
+  min-width: 0;
 }
 
+.phaser-canvas {
+  max-width: 100%;
+  max-height: 100%;
+  display: flex;
+}
+
+/*
+ * Phaser's canvas keeps its internal resolution (game world coordinates)
+ * fixed via width/height attributes; these CSS rules only scale its
+ * display size down to fit. Without this, a canvas wider than the space
+ * between the two side panels would overflow and its DOM bounding box
+ * would geometrically extend underneath them — since Phaser tracks the
+ * pointer globally via getBoundingClientRect(), clicking a sidebar
+ * control in that overlapping zone gets misread as a canvas click on
+ * the background, deselecting whatever was selected.
+ */
 .phaser-canvas canvas {
   display: block;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
 }
