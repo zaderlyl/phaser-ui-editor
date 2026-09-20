@@ -1,0 +1,101 @@
+.export-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.export-modal {
+  width: min(700px, 90vw);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  background: #14161c;
+  border: 1px solid #2a2d38;
+  border-radius: 8px;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+.export-modal__header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.export-modal__name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  color: #9ca3af;
+  font-size: 0.75rem;
+}
+
+.export-modal__name-field input {
+  padding: 0.3rem 0.4rem;
+  background: #1d1f27;
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+  min-width: 200px;
+}
+
+.export-modal__close {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.export-modal__close:hover {
+  color: #e5e7eb;
+}
+
+.export-modal__error {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  color: #dc5c5c;
+}
+
+.export-modal__code {
+  flex: 1 1 auto;
+  overflow: auto;
+  margin: 0 0 0.75rem;
+  padding: 0.75rem;
+  background: #0f1015;
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.export-modal__actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.export-modal__actions button {
+  padding: 0.5rem 0.9rem;
+  background: #1d1f27;
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.export-modal__actions button:hover {
+  background: #262933;
+}
