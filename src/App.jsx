@@ -16,6 +16,10 @@ function App() {
     sceneRef.current?.updateElementProps(id, patch)
   }, [])
 
+  const handleRename = useCallback((id, name) => {
+    return sceneRef.current?.renameElement(id, name) ?? { success: false, error: 'Éditeur non prêt' }
+  }, [])
+
   return (
     <div className="app">
       <header className="app-header">Phaser UI Editor</header>
@@ -28,7 +32,11 @@ function App() {
             onElementChange={setSelectedElement}
           />
         </main>
-        <PropertiesPanel element={selectedElement} onChange={handlePropertyChange} />
+        <PropertiesPanel
+          element={selectedElement}
+          onChange={handlePropertyChange}
+          onRename={handleRename}
+        />
       </div>
     </div>
   )

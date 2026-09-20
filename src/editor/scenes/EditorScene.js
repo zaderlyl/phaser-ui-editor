@@ -5,6 +5,9 @@ const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
 const MIN_ELEMENT_SIZE = 10
 const CORNERS = ['tl', 'tr', 'bl', 'br']
+// Matches a valid JS identifier — the generated code will use this name
+// directly as a property (this.<name>), so it must be a legal one.
+const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 
 // Editing surface: a real Phaser scene, so whatever renders here is pixel-identical
 // to what the exported UI will look like in the actual game.
@@ -16,6 +19,8 @@ export class EditorScene extends Phaser.Scene {
     // code generation) will read from and write to.
     this.elements = []
     this.selectedId = null
+    // Per-type counters for generating default names (panel1, panel2, ...).
+    this.typeCounters = {}
   }
 
   create() {
@@ -120,7 +125,10 @@ export class EditorScene extends Phaser.Scene {
 
     // Resolve against the component's defaults so element.props always holds
     // the full, current set of fields (needed by e.g. the properties panel).
-    const resolvedProps = { ...definition.defaultProps, ...props }
+    // A default name (panel1, panel2, ...) is assigned unless one was given.
+    this.typeCounters[type] = (this.typeCounters[type] ?? 0) + 1
+    const defaultName = `${type}${this.typeCounters[type]}`
+    const resolvedProps = { ...definition.defaultProps, name: defaultName, ...props }
     const gameObject = definition.create(this, resolvedProps)
     const id = crypto.randomUUID()
     gameObject.setData('elementId', id)
@@ -182,6 +190,31 @@ export class EditorScene extends Phaser.Scene {
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
+  }
+
+  // Renames an element after validating it as a JS identifier (it becomes
+  // this.<name> in the generated code) and checking uniqueness among the
+  // other placed elements. Returns { success } or { success: false, error }
+  // so the UI can show the problem without touching the stored name.
+  renameElement(id, name) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return { success: false, error: 'Élément introuvable' }
+
+    if (!IDENTIFIER_PATTERN.test(name)) {
+      return {
+        success: false,
+        error: 'Nom invalide : lettres, chiffres, _ uniquement, sans commencer par un chiffre',
+      }
+    }
+
+    const isDuplicate = this.elements.some((el) => el.id !== id && el.props.name === name)
+    if (isDuplicate) {
+      return { success: false, error: 'Ce nom est déjà utilisé par un autre élément' }
+    }
+
+    element.props.name = name
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    return { success: true }
   }
 
   // Plain-object copy of an element (no GameObject reference), safe to hand
