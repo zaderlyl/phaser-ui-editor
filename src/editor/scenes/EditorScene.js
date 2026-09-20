@@ -44,6 +44,21 @@ export class EditorScene extends Phaser.Scene {
       }
     })
 
+    // Dragging moves the element and keeps its stored props (and the
+    // selection frame) in sync with its actual position.
+    this.input.on('drag', (_pointer, gameObject, dragX, dragY) => {
+      gameObject.x = dragX
+      gameObject.y = dragY
+
+      const element = this.elements.find((el) => el.gameObject === gameObject)
+      if (element) {
+        element.props.x = dragX
+        element.props.y = dragY
+      }
+
+      this.drawSelection()
+    })
+
     // Demo instance to prove the library → addElement → render pipeline works.
     this.addElement('panel', {
       x: width / 2,
@@ -69,6 +84,7 @@ export class EditorScene extends Phaser.Scene {
     gameObject.setData('elementType', type)
     if (typeof gameObject.setInteractive === 'function') {
       gameObject.setInteractive({ useHandCursor: true })
+      this.input.setDraggable(gameObject)
     }
 
     const element = { id, type, props, gameObject }
