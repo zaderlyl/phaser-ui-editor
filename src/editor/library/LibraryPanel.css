@@ -26,3 +26,16 @@
   margin: 0;
   padding: 0;
 }
+
+.library-panel__item {
+  padding: 0.4rem 0.5rem;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+  cursor: grab;
+  user-select: none;
+}
+
+.library-panel__item:hover {
+  background: #1d1f27;
+}
