@@ -20,6 +20,14 @@
   min-height: 0;
 }
 
+.left-sidebar {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid #2a2d38;
+}
+
 .app-main {
   flex: 1 1 auto;
   display: flex;

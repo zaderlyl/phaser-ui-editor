@@ -14,6 +14,7 @@ export function PhaserCanvas({
   onSceneReady,
   onSelectionChange,
   onElementChange,
+  onElementsChange,
 }) {
   const containerRef = useRef(null)
   const gameRef = useRef(null)
@@ -37,6 +38,7 @@ export function PhaserCanvas({
       sceneRef.current = scene
       scene.events.on('selectionchange', (element) => onSelectionChange?.(element))
       scene.events.on('elementchange', (element) => onElementChange?.(element))
+      scene.events.on('elementsChange', (elements) => onElementsChange?.(elements))
       onSceneReady?.(scene)
     })
 

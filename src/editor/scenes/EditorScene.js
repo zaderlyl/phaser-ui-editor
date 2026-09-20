@@ -144,7 +144,10 @@ export class EditorScene extends Phaser.Scene {
     }
 
     const element = { id, type, props: resolvedProps, gameObject }
+    // New elements go on top, matching most editors' default stacking.
     this.elements.push(element)
+    this.reindexDepths()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
     return element
   }
 
@@ -158,6 +161,26 @@ export class EditorScene extends Phaser.Scene {
 
     const [element] = this.elements.splice(index, 1)
     element.gameObject.destroy()
+    this.reindexDepths()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  // Reorders elements to match the given id order (back to front) and
+  // reassigns depths accordingly — used by the layers panel's drag-to-reorder.
+  reorderElements(orderedIds) {
+    const byId = new Map(this.elements.map((element) => [element.id, element]))
+    const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean)
+    if (reordered.length !== this.elements.length) return
+
+    this.elements = reordered
+    this.reindexDepths()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  // Depth follows array order (index 0 = backmost), so paint order always
+  // matches the elements list — including the layers panel's display order.
+  reindexDepths() {
+    this.elements.forEach((element, index) => element.gameObject.setDepth(index))
   }
 
   selectElement(id) {
@@ -219,6 +242,7 @@ export class EditorScene extends Phaser.Scene {
 
     element.props.name = name
     this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
     return { success: true }
   }
 
@@ -228,6 +252,16 @@ export class EditorScene extends Phaser.Scene {
     const element = this.elements.find((el) => el.id === id)
     if (!element) return null
     return { id: element.id, type: element.type, props: { ...element.props } }
+  }
+
+  // Plain-object copy of the full elements list, in back-to-front order —
+  // what the layers panel renders (reversed, so front is on top visually).
+  getElementsSnapshot() {
+    return this.elements.map((element) => ({
+      id: element.id,
+      type: element.type,
+      props: { ...element.props },
+    }))
   }
 
   // Resizes the selected element so the dragged corner follows the pointer
