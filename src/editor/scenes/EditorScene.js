@@ -286,15 +286,20 @@ export class EditorScene extends Phaser.Scene {
     this.input.keyboard.on('keydown-DELETE', handleDeleteKey)
     this.input.keyboard.on('keydown-BACKSPACE', handleDeleteKey)
 
-    // Cmd+G (Mac) / Ctrl+G (Windows/Linux) groups the current selection.
-    // Browsers default Ctrl/Cmd+G to "find next" — preventDefault stops that.
+    // Cmd+G (Mac) / Ctrl+G (Windows/Linux) groups the current selection;
+    // adding Shift ungroups instead. Browsers default Ctrl/Cmd+G to "find
+    // next" — preventDefault stops that.
     this.input.keyboard.on('keydown-G', (event) => {
       const target = event.target
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
       if (!(event.ctrlKey || event.metaKey)) return
 
       event.preventDefault()
-      this.groupSelected()
+      if (event.shiftKey) {
+        this.ungroupSelected()
+      } else {
+        this.groupSelected()
+      }
     })
   }
 
@@ -424,6 +429,52 @@ export class EditorScene extends Phaser.Scene {
     this.reindexDepths()
 
     this.selectedIds = new Set([groupId])
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Reverses groupSelected(): every selected group's children are pulled
+  // back out of its Container and reparented directly onto the scene, at
+  // their current WORLD position — getBounds() already accounts for the
+  // container's position *and* scale, so a group that was resized (via
+  // setScale(), see resizeSelected) ungroups into correctly-sized children
+  // instead of snapping back to their pre-resize size. The group itself is
+  // removed once it has no children left to hold.
+  ungroupSelected() {
+    const groups = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && element.type === 'group',
+    )
+    if (groups.length === 0) return
+
+    const freedIds = []
+    for (const group of groups) {
+      const children = this.elements.filter((element) => element.parentId === group.id)
+
+      for (const child of children) {
+        const bounds = child.gameObject.getBounds()
+        group.gameObject.remove(child.gameObject, false)
+        this.add.existing(child.gameObject)
+
+        child.gameObject.setSize(bounds.width, bounds.height)
+        child.gameObject.x = bounds.left + child.gameObject.originX * bounds.width
+        child.gameObject.y = bounds.top + child.gameObject.originY * bounds.height
+        child.parentId = null
+        child.props.width = bounds.width
+        child.props.height = bounds.height
+        child.props.x = child.gameObject.x
+        child.props.y = child.gameObject.y
+        freedIds.push(child.id)
+      }
+
+      if (this.enteredGroupId === group.id) this.enteredGroupId = null
+      const index = this.elements.findIndex((element) => element.id === group.id)
+      if (index !== -1) this.elements.splice(index, 1)
+      group.gameObject.destroy()
+    }
+
+    this.reindexDepths()
+    this.selectedIds = new Set(freedIds)
     this.drawSelection()
     this.events.emit('elementsChange', this.getElementsSnapshot())
     this.events.emit('selectionchange', this.getSelectionSnapshot())

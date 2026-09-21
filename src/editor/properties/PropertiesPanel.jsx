@@ -25,6 +25,7 @@ export function PropertiesPanel({
   onDeleteSelected,
   onAlign,
   onGroup,
+  onUngroup,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -176,6 +177,12 @@ export function PropertiesPanel({
           <span className="properties-panel__group-label">Couleur</span>
           <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
         </div>
+      )}
+
+      {single.type === 'group' && (
+        <button type="button" className="properties-panel__group-button" onClick={onUngroup}>
+          Dégrouper (⌘⇧G)
+        </button>
       )}
 
       <button type="button" className="properties-panel__delete" onClick={() => onDelete(id)}>

@@ -49,6 +49,10 @@ function App() {
     sceneRef.current?.groupSelected()
   }, [])
 
+  const handleUngroup = useCallback(() => {
+    sceneRef.current?.ungroupSelected()
+  }, [])
+
   // Live position/size/name updates from a single-element drag, resize or
   // rename (see EditorScene's 'elementchange') only ever concern the one
   // element currently selected, so just refresh it in place.
@@ -90,6 +94,7 @@ function App() {
           onDeleteSelected={handleDeleteSelected}
           onAlign={handleAlign}
           onGroup={handleGroup}
+          onUngroup={handleUngroup}
         />
       </div>
 
