@@ -29,10 +29,11 @@ export class EditorScene extends Phaser.Scene {
   create() {
     const { width, height } = this.scale
 
-    const background = this.add
+    this.background = this.add
       .rectangle(0, 0, width, height, 0x1d1f27)
       .setOrigin(0)
-    background.setInteractive()
+    this.background.setInteractive()
+    this.input.setDraggable(this.background)
 
     this.add
       .text(8, 8, `${width}×${height}`, {
@@ -44,6 +45,10 @@ export class EditorScene extends Phaser.Scene {
 
     this.selectionGraphics = this.add.graphics()
     this.selectionGraphics.setDepth(10000)
+
+    this.marqueeGraphics = this.add.graphics()
+    this.marqueeGraphics.setDepth(9999)
+    this.marqueeStart = null
 
     this.resizeHandles = CORNERS.map((corner) => {
       const handle = this.add
@@ -80,7 +85,17 @@ export class EditorScene extends Phaser.Scene {
     // corner stays fixed in place while the grabbed one follows the pointer.
     // Resize handles only appear for a single selected element (see
     // drawSelection), so this.selectedIds always has exactly one id here.
-    this.input.on('dragstart', (_pointer, gameObject) => {
+    this.input.on('dragstart', (pointer, gameObject) => {
+      if (gameObject === this.background) {
+        // Rubber-band select: shift held means "add to the current
+        // selection" (captured now, before the drag starts changing it),
+        // otherwise the marquee starts from an empty selection.
+        this.marqueeStart = { x: pointer.x, y: pointer.y }
+        this.marqueeAdditive = !!pointer.event?.shiftKey
+        this.marqueeBaseSelection = new Set(this.selectedIds)
+        return
+      }
+
       if (!gameObject.getData('isHandle')) return
 
       const [selectedId] = this.selectedIds
@@ -93,7 +108,12 @@ export class EditorScene extends Phaser.Scene {
       gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
     })
 
-    this.input.on('drag', (_pointer, gameObject, dragX, dragY) => {
+    this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+      if (gameObject === this.background) {
+        this.updateMarqueeSelection(pointer.x, pointer.y)
+        return
+      }
+
       if (gameObject.getData('isHandle')) {
         this.resizeSelected(gameObject, dragX, dragY)
         return
@@ -128,6 +148,12 @@ export class EditorScene extends Phaser.Scene {
       }
 
       this.drawSelection()
+    })
+
+    this.input.on('dragend', (_pointer, gameObject) => {
+      if (gameObject !== this.background) return
+      this.marqueeGraphics.clear()
+      this.marqueeStart = null
     })
 
     // Delete/Backspace removes every selected element — but only when the
@@ -215,6 +241,38 @@ export class EditorScene extends Phaser.Scene {
   // matches the elements list — including the layers panel's display order.
   reindexDepths() {
     this.elements.forEach((element, index) => element.gameObject.setDepth(index))
+  }
+
+  // Rubber-band select: redraws the marquee rectangle from its drag-start
+  // point to the current pointer position, and updates the selection to
+  // whatever placed elements it currently overlaps (shift-drag adds to the
+  // selection captured at dragstart instead of replacing it). Called live
+  // on every pointer move during the drag, same as a normal element drag.
+  updateMarqueeSelection(currentX, currentY) {
+    if (!this.marqueeStart) return
+
+    const left = Math.min(this.marqueeStart.x, currentX)
+    const right = Math.max(this.marqueeStart.x, currentX)
+    const top = Math.min(this.marqueeStart.y, currentY)
+    const bottom = Math.max(this.marqueeStart.y, currentY)
+
+    this.marqueeGraphics.clear()
+    this.marqueeGraphics.fillStyle(SELECTION_COLOR, 0.1)
+    this.marqueeGraphics.fillRect(left, top, right - left, bottom - top)
+    this.marqueeGraphics.lineStyle(1, SELECTION_COLOR, 0.8)
+    this.marqueeGraphics.strokeRect(left, top, right - left, bottom - top)
+
+    const overlapping = this.elements.filter((element) => {
+      const bounds = element.gameObject.getBounds()
+      return bounds.left < right && bounds.right > left && bounds.top < bottom && bounds.bottom > top
+    })
+
+    this.selectedIds = this.marqueeAdditive
+      ? new Set([...this.marqueeBaseSelection, ...overlapping.map((element) => element.id)])
+      : new Set(overlapping.map((element) => element.id))
+
+    this.drawSelection()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
   // additive (shift-click): toggles the element in/out of the current
