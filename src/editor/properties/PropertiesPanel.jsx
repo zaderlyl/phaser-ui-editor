@@ -17,7 +17,16 @@ function hexToColorNumber(hex) {
 // with several, a lighter view (count + align tools + bulk delete), since
 // there's no single coherent set of fields to edit across different
 // elements yet.
-export function PropertiesPanel({ elements, onChange, onRename, onDelete, onDeleteSelected, onAlign }) {
+export function PropertiesPanel({
+  elements,
+  onChange,
+  onRename,
+  onDelete,
+  onDeleteSelected,
+  onAlign,
+  onGroup,
+  onUngroup,
+}) {
   const single = elements.length === 1 ? elements[0] : null
 
   // Reset the name draft during render when the selection changes (the
@@ -78,6 +87,10 @@ export function PropertiesPanel({ elements, onChange, onRename, onDelete, onDele
           </div>
         </div>
 
+        <button type="button" className="properties-panel__group-button" onClick={onGroup}>
+          Grouper (⌘G)
+        </button>
+
         <button type="button" className="properties-panel__delete" onClick={onDeleteSelected}>
           Supprimer ({elements.length})
         </button>
@@ -133,34 +146,50 @@ export function PropertiesPanel({ elements, onChange, onRename, onDelete, onDele
         </div>
       </div>
 
-      <div className="properties-panel__group">
-        <span className="properties-panel__group-label">Taille</span>
-        <div className="properties-panel__row">
-          <label>
-            L
-            <input
-              type="number"
-              min="1"
-              value={Math.round(props.width)}
-              onChange={handleNumberChange('width')}
-            />
-          </label>
-          <label>
-            H
-            <input
-              type="number"
-              min="1"
-              value={Math.round(props.height)}
-              onChange={handleNumberChange('height')}
-            />
-          </label>
+      {'width' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Taille</span>
+          <div className="properties-panel__row">
+            <label>
+              L
+              <input
+                type="number"
+                min="1"
+                value={Math.round(props.width)}
+                onChange={handleNumberChange('width')}
+              />
+            </label>
+            <label>
+              H
+              <input
+                type="number"
+                min="1"
+                value={Math.round(props.height)}
+                onChange={handleNumberChange('height')}
+              />
+            </label>
+          </div>
         </div>
-      </div>
+      )}
 
-      <div className="properties-panel__group">
-        <span className="properties-panel__group-label">Couleur</span>
-        <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
-      </div>
+      {'color' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur</span>
+          <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
+        </div>
+      )}
+
+      {single.type === 'group' && (
+        <button type="button" className="properties-panel__group-button" onClick={onUngroup}>
+          Dégrouper (⌘⇧G)
+        </button>
+      )}
+
+      {single.parentId && (
+        <button type="button" className="properties-panel__group-button" onClick={onUngroup}>
+          Sortir du groupe (⌘⇧G)
+        </button>
+      )}
 
       <button type="button" className="properties-panel__delete" onClick={() => onDelete(id)}>
         Supprimer

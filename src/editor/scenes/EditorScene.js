@@ -3,6 +3,12 @@ import { componentLibrary } from '../library/registry'
 
 const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
+// Extra invisible margin around each handle's visual size, purely for
+// hit-testing: at HANDLE_SIZE alone, missing the handle by just a few
+// pixels (easy at typical cursor precision, worse on a CSS-scaled-down
+// canvas) grabs whatever's underneath instead — for a grouped element,
+// that misreads as "move the group" instead of "resize it".
+const HANDLE_HIT_PADDING = 8
 const MIN_ELEMENT_SIZE = 10
 const CORNERS = ['tl', 'tr', 'bl', 'br']
 // Matches a valid JS identifier — the generated code will use this name
@@ -24,6 +30,12 @@ export class EditorScene extends Phaser.Scene {
     this.selectedIds = new Set()
     // Per-type counters for generating default names (panel1, panel2, ...).
     this.typeCounters = {}
+    // The group id you're currently "inside" (via double-click), or null.
+    // While inside a group, clicking/dragging its direct children affects
+    // them individually; otherwise a child redirects to its whole group.
+    this.enteredGroupId = null
+    this.lastClickedId = null
+    this.lastClickTime = 0
   }
 
   create() {
@@ -58,7 +70,14 @@ export class EditorScene extends Phaser.Scene {
         .setVisible(false)
       handle.setData('isHandle', true)
       handle.setData('corner', corner)
-      handle.setInteractive({ useHandCursor: true })
+      // A hitArea larger than the visible square, centered on the same
+      // point — see HANDLE_HIT_PADDING above.
+      const hitSize = HANDLE_SIZE + HANDLE_HIT_PADDING * 2
+      handle.setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(-HANDLE_HIT_PADDING, -HANDLE_HIT_PADDING, hitSize, hitSize),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        useHandCursor: true,
+      })
       handle.input.enabled = false
       this.input.setDraggable(handle)
       return handle
@@ -69,15 +88,54 @@ export class EditorScene extends Phaser.Scene {
     // clears the selection, unless shift is held — a shift-click on empty
     // space is a no-op rather than wiping out what's already selected.
     // Handles are editor chrome, never a selection target themselves.
+    //
+    // A child of a group works like Figma's frames: clicking it while you
+    // haven't "entered" its group selects (and, per the 'drag' handler,
+    // moves) the whole group instead — double-clicking the same child
+    // within 300ms enters that group, so it and its siblings can be
+    // selected/dragged individually until you click something else.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
       if (gameObject.getData('isHandle')) return
 
       const additive = !!pointer.event?.shiftKey
       const elementId = gameObject.getData('elementId')
-      if (elementId) {
+
+      if (!elementId) {
+        if (!additive) {
+          this.deselectAll()
+          this.enteredGroupId = null
+        }
+        return
+      }
+
+      const element = this.elements.find((el) => el.id === elementId)
+
+      if (element?.parentId && element.parentId === this.enteredGroupId) {
+        // Child of the group we're already inside — select it directly.
         this.selectElement(elementId, { additive })
-      } else if (!additive) {
-        this.deselectAll()
+        return
+      }
+
+      if (!element?.parentId) {
+        // Top-level element (a plain element, or a group itself) — select
+        // directly, and we're no longer "inside" any specific group.
+        this.enteredGroupId = null
+        this.selectElement(elementId, { additive })
+        return
+      }
+
+      // A child of a group we haven't entered yet.
+      const now = performance.now()
+      const isDoubleClick = this.lastClickedId === elementId && now - this.lastClickTime < 300
+      this.lastClickedId = elementId
+      this.lastClickTime = now
+
+      if (isDoubleClick) {
+        this.enteredGroupId = element.parentId
+        this.selectElement(elementId, { additive })
+      } else {
+        this.enteredGroupId = null
+        this.selectElement(element.parentId, { additive })
       }
     })
 
@@ -94,30 +152,61 @@ export class EditorScene extends Phaser.Scene {
         return
       }
 
-      if (!gameObject.getData('isHandle')) return
+      if (gameObject.getData('isHandle')) {
+        const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
+        if (elements.length === 0) return
 
-      const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
-      if (elements.length === 0) return
+        const bounds = this.getBoundsUnion(elements)
+        const corner = gameObject.getData('corner')
+        gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
+        gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
 
-      const bounds = this.getBoundsUnion(elements)
-      const corner = gameObject.getData('corner')
-      gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
-      gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
+        // Snapshot every selected element's bounds relative to the group's
+        // (single element or many — same math either way), so resizeSelected
+        // can scale each one proportionally as the group bounds change.
+        this.resizeStartBounds = bounds
+        this.resizeSnapshot = elements.map((element) => {
+          const elBounds = element.gameObject.getBounds()
+          return {
+            element,
+            relLeft: elBounds.left - bounds.left,
+            relTop: elBounds.top - bounds.top,
+            width: elBounds.width,
+            height: elBounds.height,
+            // For a group: its scale *before this drag started*. 'drag'
+            // fires on every pointer move, each tick recomputing the full
+            // absolute size from this same fixed snapshot — reading the
+            // group's *current* (already-updated-by-the-previous-tick)
+            // scale instead would compound it further on every tick,
+            // growing exponentially instead of tracking the pointer.
+            startScaleX: element.gameObject.scaleX ?? 1,
+            startScaleY: element.gameObject.scaleY ?? 1,
+          }
+        })
+        return
+      }
 
-      // Snapshot every selected element's bounds relative to the group's
-      // (single element or many — same math either way), so resizeSelected
-      // can scale each one proportionally as the group bounds change.
-      this.resizeStartBounds = bounds
-      this.resizeSnapshot = elements.map((element) => {
-        const elBounds = element.gameObject.getBounds()
-        return {
-          element,
-          relLeft: elBounds.left - bounds.left,
-          relTop: elBounds.top - bounds.top,
-          width: elBounds.width,
-          height: elBounds.height,
+      // A child of a group we haven't entered: 'gameobjectdown' already
+      // selected the whole group instead of this child, but Phaser's own
+      // drag targets whatever was actually grabbed (the child) — redirect
+      // the upcoming 'drag' ticks to move the group instead. Phaser's
+      // dragX/dragY are computed relative to the child's own position, not
+      // valid for the group, so raw pointer movement is tracked instead.
+      const elementId = gameObject.getData('elementId')
+      const element = this.elements.find((el) => el.id === elementId)
+      if (element?.parentId && element.parentId !== this.enteredGroupId) {
+        const groupElement = this.elements.find((el) => el.id === element.parentId)
+        if (groupElement) {
+          this.groupDragRedirect = {
+            childId: elementId,
+            groupElement,
+            pointerStartX: pointer.x,
+            pointerStartY: pointer.y,
+            groupStartX: groupElement.gameObject.x,
+            groupStartY: groupElement.gameObject.y,
+          }
         }
-      })
+      }
     })
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
@@ -127,11 +216,24 @@ export class EditorScene extends Phaser.Scene {
       }
 
       if (gameObject.getData('isHandle')) {
-        this.resizeSelected(gameObject, dragX, dragY)
+        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey)
         return
       }
 
       const elementId = gameObject.getData('elementId')
+
+      if (this.groupDragRedirect?.childId === elementId) {
+        const { groupElement, pointerStartX, pointerStartY, groupStartX, groupStartY } =
+          this.groupDragRedirect
+        groupElement.gameObject.x = groupStartX + (pointer.x - pointerStartX)
+        groupElement.gameObject.y = groupStartY + (pointer.y - pointerStartY)
+        groupElement.props.x = groupElement.gameObject.x
+        groupElement.props.y = groupElement.gameObject.y
+        this.drawSelection()
+        this.events.emit('elementchange', this.getElementSnapshot(groupElement.id))
+        return
+      }
+
       const element = this.elements.find((el) => el.id === elementId)
       if (!element) return
 
@@ -163,9 +265,20 @@ export class EditorScene extends Phaser.Scene {
     })
 
     this.input.on('dragend', (_pointer, gameObject) => {
-      if (gameObject !== this.background) return
-      this.marqueeGraphics.clear()
-      this.marqueeStart = null
+      this.groupDragRedirect = null
+      if (gameObject === this.background) {
+        this.marqueeGraphics.clear()
+        this.marqueeStart = null
+        return
+      }
+      // Every other drag (element move, group move, resize) touched
+      // position and/or size, but the live 'elementchange'/'elementsChange'
+      // emitted mid-drag (see 'drag' above and resizeSelected) only cover
+      // the moved/resized element(s) — cheap per-tick updates meant for the
+      // properties panel, not a full sync. Consumers that need the whole
+      // list current (the layers panel, code export) only get one once the
+      // drag actually settles here.
+      this.events.emit('elementsChange', this.getElementsSnapshot())
     })
 
     // Delete/Backspace removes every selected element — but only when the
@@ -182,6 +295,22 @@ export class EditorScene extends Phaser.Scene {
     }
     this.input.keyboard.on('keydown-DELETE', handleDeleteKey)
     this.input.keyboard.on('keydown-BACKSPACE', handleDeleteKey)
+
+    // Cmd+G (Mac) / Ctrl+G (Windows/Linux) groups the current selection;
+    // adding Shift ungroups instead. Browsers default Ctrl/Cmd+G to "find
+    // next" — preventDefault stops that.
+    this.input.keyboard.on('keydown-G', (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!(event.ctrlKey || event.metaKey)) return
+
+      event.preventDefault()
+      if (event.shiftKey) {
+        this.ungroupSelected()
+      } else {
+        this.groupSelected()
+      }
+    })
   }
 
   // Instantiates a real Phaser GameObject for the given library component type
@@ -207,7 +336,10 @@ export class EditorScene extends Phaser.Scene {
       this.input.setDraggable(gameObject)
     }
 
-    const element = { id, type, props: resolvedProps, gameObject }
+    // parentId: null for a top-level element, or a group's id once grouped
+    // (see groupSelected) — the element stays in this flat list either way,
+    // just excluded from top-level views (layers panel, depth ordering).
+    const element = { id, type, props: resolvedProps, gameObject, parentId: null }
     // New elements go on top, matching most editors' default stacking.
     this.elements.push(element)
     this.reindexDepths()
@@ -216,6 +348,20 @@ export class EditorScene extends Phaser.Scene {
   }
 
   removeElement(id) {
+    if (!this.elements.some((element) => element.id === id)) return
+
+    // Removing a group takes its children down with it — Phaser's own
+    // Container.destroy() already destroys them, this just keeps
+    // this.elements from holding dangling entries for destroyed gameObjects.
+    // Done first so the parent's index below can't be shifted out from
+    // under it by a child removal earlier in the array.
+    const childIds = this.elements
+      .filter((element) => element.parentId === id)
+      .map((element) => element.id)
+    for (const childId of childIds) {
+      this.removeElement(childId)
+    }
+
     const index = this.elements.findIndex((element) => element.id === id)
     if (index === -1) return
 
@@ -237,6 +383,188 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
+  // Bundles the currently selected top-level elements into a real Phaser
+  // Container: a group's own entry in this.elements, whose gameObject is a
+  // Container that the selected elements' gameObjects get reparented into.
+  // Moving/dragging the group then moves everything inside it for free —
+  // Phaser positions container children in local (container-relative)
+  // space automatically, no manual per-child delta propagation needed.
+  // Already-grouped elements aren't eligible for now (nested/mixed-depth
+  // grouping is a later step); fewer than 2 eligible elements is a no-op.
+  groupSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length < 2) return
+
+    const bounds = this.getBoundsUnion(selected)
+
+    const container = this.add.container(bounds.left, bounds.top)
+    // Container.originX/Y are a read-only 0.5 in this Phaser version, but
+    // that doesn't affect positioning here: container.x/y (and its
+    // children's local x/y) map directly to world coordinates with no
+    // origin-based offset — verified empirically, since assuming otherwise
+    // silently shifted every grouped child on first pass (see below).
+    container.setSize(bounds.width, bounds.height)
+    container.setInteractive({ useHandCursor: true })
+    this.input.setDraggable(container)
+
+    this.typeCounters.group = (this.typeCounters.group ?? 0) + 1
+    const groupId = crypto.randomUUID()
+    container.setData('elementId', groupId)
+    container.setData('elementType', 'group')
+
+    // Container.add() does NOT convert a child's existing x/y from world to
+    // local space — it just keeps whatever x/y the child already has and
+    // starts treating it as container-relative. So each child's world x/y
+    // has to be converted to container-local (i.e. offset by the group's
+    // own world position) *before* reparenting, or it visibly jumps.
+    for (const element of selected) {
+      element.gameObject.x -= bounds.left
+      element.gameObject.y -= bounds.top
+      container.add(element.gameObject)
+      element.parentId = groupId
+      element.props.x = element.gameObject.x
+      element.props.y = element.gameObject.y
+    }
+
+    const groupElement = {
+      id: groupId,
+      type: 'group',
+      parentId: null,
+      props: { name: `group${this.typeCounters.group}`, x: bounds.left, y: bounds.top, scaleX: 1, scaleY: 1 },
+      gameObject: container,
+    }
+    this.elements.push(groupElement)
+    this.reindexDepths()
+
+    this.selectedIds = new Set([groupId])
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Pulls one child out of its group's Container and back onto the scene
+  // directly, at its current WORLD position — getBounds() already accounts
+  // for the container's position *and* scale, so a child of a group that
+  // was resized (via setScale(), see resizeSelected) comes out at its
+  // correctly-scaled size instead of snapping back to its pre-resize size.
+  // Does not touch this.elements or emit events — callers own that, since
+  // both a full ungroup (many children at once) and extracting a single
+  // child need this same per-child mechanics but differ in bookkeeping.
+  reparentToScene(child, group) {
+    const bounds = child.gameObject.getBounds()
+    group.gameObject.remove(child.gameObject, false)
+    this.add.existing(child.gameObject)
+
+    child.gameObject.setSize(bounds.width, bounds.height)
+    child.gameObject.x = bounds.left + child.gameObject.originX * bounds.width
+    child.gameObject.y = bounds.top + child.gameObject.originY * bounds.height
+    child.parentId = null
+    child.props.width = bounds.width
+    child.props.height = bounds.height
+    child.props.x = child.gameObject.x
+    child.props.y = child.gameObject.y
+  }
+
+  // Removes a now-empty (or emptied-down-to-one-child, see ungroupSelected)
+  // group's own element/Container. Callers already moved its children out.
+  destroyGroup(group) {
+    if (this.enteredGroupId === group.id) this.enteredGroupId = null
+    const index = this.elements.findIndex((element) => element.id === group.id)
+    if (index !== -1) this.elements.splice(index, 1)
+    group.gameObject.destroy()
+  }
+
+  // Cmd/Ctrl+Shift+G. Two cases, both "take the selection out of its
+  // group(s)":
+  //  - a selected element that IS a group: the whole group dissolves, every
+  //    child comes out (the full reverse of groupSelected).
+  //  - a selected element that's a child of a group which *isn't* itself
+  //    selected (e.g. entered via double-click, then single-clicked): just
+  //    that one element is extracted, leaving its siblings grouped — unless
+  //    that leaves the group with fewer than 2 children, in which case a
+  //    "group" of one thing no longer means anything, so the last child
+  //    comes out too and the group goes with it.
+  ungroupSelected() {
+    const selected = this.elements.filter((element) => this.selectedIds.has(element.id))
+    const groups = selected.filter((element) => element.type === 'group')
+    const loneChildren = selected.filter(
+      (element) => element.parentId && !this.selectedIds.has(element.parentId),
+    )
+    if (groups.length === 0 && loneChildren.length === 0) return
+
+    const freedIds = []
+    const groupsToRecheck = new Set()
+
+    for (const group of groups) {
+      for (const child of this.elements.filter((element) => element.parentId === group.id)) {
+        this.reparentToScene(child, group)
+        freedIds.push(child.id)
+      }
+      this.destroyGroup(group)
+    }
+
+    for (const child of loneChildren) {
+      const group = this.elements.find((element) => element.id === child.parentId)
+      if (!group) continue
+      this.reparentToScene(child, group)
+      freedIds.push(child.id)
+      groupsToRecheck.add(group.id)
+    }
+
+    for (const groupId of groupsToRecheck) {
+      const group = this.elements.find((element) => element.id === groupId)
+      if (!group) continue
+      const remaining = this.elements.filter((element) => element.parentId === groupId)
+      if (remaining.length > 1) continue
+      for (const last of remaining) {
+        this.reparentToScene(last, group)
+        freedIds.push(last.id)
+      }
+      this.destroyGroup(group)
+    }
+
+    this.reindexDepths()
+    this.selectedIds = new Set(freedIds)
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Layers panel drag-out: a group's child was dropped onto a top-level
+  // row, so it's extracted from its group (same rules as ungroupSelected's
+  // lone-child case — the group dissolves too if that leaves it with fewer
+  // than 2 children) *and* moved to sit at that exact position in paint
+  // order. orderedIds is the full back-to-front id list the panel already
+  // computed for a plain reorder; stale ids (a group dissolved by this same
+  // call) are dropped automatically since they no longer resolve.
+  extractChildToPosition(childId, orderedIds) {
+    const child = this.elements.find((element) => element.id === childId)
+    if (!child?.parentId) return
+    const group = this.elements.find((element) => element.id === child.parentId)
+    if (!group) return
+
+    this.reparentToScene(child, group)
+    const remaining = this.elements.filter((element) => element.parentId === group.id)
+    if (remaining.length <= 1) {
+      for (const last of remaining) this.reparentToScene(last, group)
+      this.destroyGroup(group)
+    }
+
+    const byId = new Map(this.elements.map((element) => [element.id, element]))
+    const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean)
+    if (reordered.length === this.elements.length) {
+      this.elements = reordered
+    }
+
+    this.reindexDepths()
+    this.selectedIds = new Set([childId])
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
   // Reorders elements to match the given id order (back to front) and
   // reassigns depths accordingly — used by the layers panel's drag-to-reorder.
   reorderElements(orderedIds) {
@@ -251,8 +579,13 @@ export class EditorScene extends Phaser.Scene {
 
   // Depth follows array order (index 0 = backmost), so paint order always
   // matches the elements list — including the layers panel's display order.
+  // Only top-level elements are scene-depth-sorted; a grouped child's paint
+  // order comes from its position in the parent Container's own child list
+  // instead (see groupSelected), which Phaser manages on its own.
   reindexDepths() {
-    this.elements.forEach((element, index) => element.gameObject.setDepth(index))
+    this.elements
+      .filter((element) => !element.parentId)
+      .forEach((element, index) => element.gameObject.setDepth(index))
   }
 
   // Rubber-band select: redraws the marquee rectangle from its drag-start
@@ -419,15 +752,23 @@ export class EditorScene extends Phaser.Scene {
   getElementSnapshot(id) {
     const element = this.elements.find((el) => el.id === id)
     if (!element) return null
-    return { id: element.id, type: element.type, props: { ...element.props } }
+    return {
+      id: element.id,
+      type: element.type,
+      parentId: element.parentId,
+      props: { ...element.props },
+    }
   }
 
   // Plain-object copy of the full elements list, in back-to-front order —
   // what the layers panel renders (reversed, so front is on top visually).
+  // parentId is null for top-level elements, or a group's id — the layers
+  // panel doesn't build a tree from it yet, that's a later step.
   getElementsSnapshot() {
     return this.elements.map((element) => ({
       id: element.id,
       type: element.type,
+      parentId: element.parentId,
       props: { ...element.props },
     }))
   }
@@ -437,7 +778,12 @@ export class EditorScene extends Phaser.Scene {
   getSelectionSnapshot() {
     return this.elements
       .filter((element) => this.selectedIds.has(element.id))
-      .map((element) => ({ id: element.id, type: element.type, props: { ...element.props } }))
+      .map((element) => ({
+        id: element.id,
+        type: element.type,
+        parentId: element.parentId,
+        props: { ...element.props },
+      }))
   }
 
   // Resizes the whole selection so the dragged corner follows the pointer
@@ -445,29 +791,76 @@ export class EditorScene extends Phaser.Scene {
   // selected element this just resizes it directly; with several, every
   // element is scaled proportionally to how the overall group bounds
   // changed, keeping their relative position/size within the group.
-  resizeSelected(handle, dragX, dragY) {
+  // Holding shift locks the aspect ratio: both axes scale by the larger of
+  // the two raw factors, so the anchored corner still stays put but the
+  // shape grows/shrinks uniformly instead of stretching.
+  resizeSelected(handle, dragX, dragY, keepAspectRatio = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
     const fixedX = handle.getData('fixedX')
     const fixedY = handle.getData('fixedY')
+    const corner = handle.getData('corner')
+    const anchorIsLeft = corner.includes('r')
+    const anchorIsTop = corner.includes('b')
 
-    const left = Math.min(fixedX, dragX)
-    const right = Math.max(fixedX, dragX)
-    const top = Math.min(fixedY, dragY)
-    const bottom = Math.max(fixedY, dragY)
+    const rawWidth = Math.max(MIN_ELEMENT_SIZE, Math.abs(dragX - fixedX))
+    const rawHeight = Math.max(MIN_ELEMENT_SIZE, Math.abs(dragY - fixedY))
 
-    const newWidth = Math.max(MIN_ELEMENT_SIZE, right - left)
-    const newHeight = Math.max(MIN_ELEMENT_SIZE, bottom - top)
-    const scaleX = newWidth / this.resizeStartBounds.width
-    const scaleY = newHeight / this.resizeStartBounds.height
+    let scaleX = rawWidth / this.resizeStartBounds.width
+    let scaleY = rawHeight / this.resizeStartBounds.height
+    if (keepAspectRatio) {
+      const uniformScale = Math.max(scaleX, scaleY)
+      scaleX = uniformScale
+      scaleY = uniformScale
+    }
 
-    for (const { element, relLeft, relTop, width, height } of this.resizeSnapshot) {
+    const newWidth = Math.max(MIN_ELEMENT_SIZE, this.resizeStartBounds.width * scaleX)
+    const newHeight = Math.max(MIN_ELEMENT_SIZE, this.resizeStartBounds.height * scaleY)
+    const left = anchorIsLeft ? fixedX : fixedX - newWidth
+    const top = anchorIsTop ? fixedY : fixedY - newHeight
+
+    for (const {
+      element,
+      relLeft,
+      relTop,
+      width,
+      height,
+      startScaleX,
+      startScaleY,
+    } of this.resizeSnapshot) {
       const elWidth = Math.max(MIN_ELEMENT_SIZE, width * scaleX)
       const elHeight = Math.max(MIN_ELEMENT_SIZE, height * scaleY)
       const elLeft = left + relLeft * scaleX
       const elTop = top + relTop * scaleY
 
       const { gameObject } = element
+
+      if (element.type === 'group') {
+        // A group's Container has no meaningful origin (x/y is already its
+        // local (0,0), i.e. its own top-left) and setSize() only affects
+        // hit-testing, not how it looks — setScale() is what actually
+        // stretches its children visually. 'drag' fires on every pointer
+        // move, each tick recomputing the FULL absolute scale from the
+        // snapshot taken at dragstart (startScaleX/Y) — never from the
+        // container's *current* scale, which the previous tick already
+        // updated and would compound exponentially if reused here.
+        gameObject.setScale((elWidth / width) * startScaleX, (elHeight / height) * startScaleY)
+        gameObject.x = elLeft
+        gameObject.y = elTop
+        // No props.width/height for a group: the properties panel would
+        // render them as plain number inputs wired to updateElementProps'
+        // setSize() path, which wouldn't visually rescale a Container the
+        // way setScale() does here — leaving them out avoids that mismatch.
+        // scaleX/Y IS tracked, though — it's how the exported code (see
+        // generateScreenClass) reproduces this same visual stretch via a
+        // real Container.setScale() call.
+        element.props.x = gameObject.x
+        element.props.y = gameObject.y
+        element.props.scaleX = gameObject.scaleX
+        element.props.scaleY = gameObject.scaleY
+        continue
+      }
+
       gameObject.setSize(elWidth, elHeight)
       gameObject.x = elLeft + gameObject.originX * elWidth
       gameObject.y = elTop + gameObject.originY * elHeight

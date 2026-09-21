@@ -90,6 +90,22 @@
   color: #dc5c5c;
 }
 
+.properties-panel__group-button {
+  width: 100%;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+  background: transparent;
+  border: 1px solid #60a5fa;
+  border-radius: 4px;
+  color: #60a5fa;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.properties-panel__group-button:hover {
+  background: rgba(96, 165, 250, 0.1);
+}
+
 .properties-panel__delete {
   width: 100%;
   padding: 0.5rem;

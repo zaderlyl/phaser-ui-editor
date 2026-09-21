@@ -41,8 +41,20 @@ function App() {
     sceneRef.current?.reorderElements(orderedIds)
   }, [])
 
+  const handleExtractChild = useCallback((childId, orderedIds) => {
+    sceneRef.current?.extractChildToPosition(childId, orderedIds)
+  }, [])
+
   const handleAlign = useCallback((mode) => {
     sceneRef.current?.alignSelected(mode)
+  }, [])
+
+  const handleGroup = useCallback(() => {
+    sceneRef.current?.groupSelected()
+  }, [])
+
+  const handleUngroup = useCallback(() => {
+    sceneRef.current?.ungroupSelected()
   }, [])
 
   // Live position/size/name updates from a single-element drag, resize or
@@ -68,6 +80,7 @@ function App() {
             selectedIds={selectedElements.map((element) => element.id)}
             onSelect={handleSelect}
             onReorder={handleReorder}
+            onExtractChild={handleExtractChild}
           />
         </div>
         <main className="app-main">
@@ -85,6 +98,8 @@ function App() {
           onDelete={handleDelete}
           onDeleteSelected={handleDeleteSelected}
           onAlign={handleAlign}
+          onGroup={handleGroup}
+          onUngroup={handleUngroup}
         />
       </div>
 
