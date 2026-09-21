@@ -83,8 +83,6 @@ export class EditorScene extends Phaser.Scene {
 
     // A handle drag starts from the corner opposite the one grabbed, so that
     // corner stays fixed in place while the grabbed one follows the pointer.
-    // Resize handles only appear for a single selected element (see
-    // drawSelection), so this.selectedIds always has exactly one id here.
     this.input.on('dragstart', (pointer, gameObject) => {
       if (gameObject === this.background) {
         // Rubber-band select: shift held means "add to the current
@@ -98,14 +96,28 @@ export class EditorScene extends Phaser.Scene {
 
       if (!gameObject.getData('isHandle')) return
 
-      const [selectedId] = this.selectedIds
-      const element = this.elements.find((el) => el.id === selectedId)
-      if (!element) return
+      const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
+      if (elements.length === 0) return
 
-      const bounds = element.gameObject.getBounds()
+      const bounds = this.getBoundsUnion(elements)
       const corner = gameObject.getData('corner')
       gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
       gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
+
+      // Snapshot every selected element's bounds relative to the group's
+      // (single element or many — same math either way), so resizeSelected
+      // can scale each one proportionally as the group bounds change.
+      this.resizeStartBounds = bounds
+      this.resizeSnapshot = elements.map((element) => {
+        const elBounds = element.gameObject.getBounds()
+        return {
+          element,
+          relLeft: elBounds.left - bounds.left,
+          relTop: elBounds.top - bounds.top,
+          width: elBounds.width,
+          height: elBounds.height,
+        }
+      })
     })
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
@@ -428,13 +440,13 @@ export class EditorScene extends Phaser.Scene {
       .map((element) => ({ id: element.id, type: element.type, props: { ...element.props } }))
   }
 
-  // Resizes the selected element so the dragged corner follows the pointer
-  // while the opposite corner (captured on dragstart) stays fixed. Only
-  // reachable with a single selected element (see drawSelection).
+  // Resizes the whole selection so the dragged corner follows the pointer
+  // while the opposite corner (captured on dragstart) stays fixed. With one
+  // selected element this just resizes it directly; with several, every
+  // element is scaled proportionally to how the overall group bounds
+  // changed, keeping their relative position/size within the group.
   resizeSelected(handle, dragX, dragY) {
-    const [selectedId] = this.selectedIds
-    const element = this.elements.find((el) => el.id === selectedId)
-    if (!element) return
+    if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
     const fixedX = handle.getData('fixedX')
     const fixedY = handle.getData('fixedY')
@@ -444,21 +456,46 @@ export class EditorScene extends Phaser.Scene {
     const top = Math.min(fixedY, dragY)
     const bottom = Math.max(fixedY, dragY)
 
-    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
-    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    const newWidth = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const newHeight = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    const scaleX = newWidth / this.resizeStartBounds.width
+    const scaleY = newHeight / this.resizeStartBounds.height
 
-    const { gameObject } = element
-    gameObject.setSize(width, height)
-    gameObject.x = left + gameObject.originX * width
-    gameObject.y = top + gameObject.originY * height
+    for (const { element, relLeft, relTop, width, height } of this.resizeSnapshot) {
+      const elWidth = Math.max(MIN_ELEMENT_SIZE, width * scaleX)
+      const elHeight = Math.max(MIN_ELEMENT_SIZE, height * scaleY)
+      const elLeft = left + relLeft * scaleX
+      const elTop = top + relTop * scaleY
 
-    element.props.width = width
-    element.props.height = height
-    element.props.x = gameObject.x
-    element.props.y = gameObject.y
+      const { gameObject } = element
+      gameObject.setSize(elWidth, elHeight)
+      gameObject.x = elLeft + gameObject.originX * elWidth
+      gameObject.y = elTop + gameObject.originY * elHeight
+
+      element.props.width = elWidth
+      element.props.height = elHeight
+      element.props.x = gameObject.x
+      element.props.y = gameObject.y
+    }
 
     this.drawSelection()
-    this.events.emit('elementchange', this.getElementSnapshot(element.id))
+    if (this.resizeSnapshot.length === 1) {
+      this.events.emit('elementchange', this.getElementSnapshot(this.resizeSnapshot[0].element.id))
+    } else {
+      this.events.emit('elementsChange', this.getElementsSnapshot())
+    }
+  }
+
+  // Union of several elements' world bounds — the group's own bounding box.
+  // With a single element this just returns its own bounds, so callers can
+  // treat the single- and multi-selection cases identically.
+  getBoundsUnion(elements) {
+    const boundsList = elements.map((element) => element.gameObject.getBounds())
+    const left = Math.min(...boundsList.map((bounds) => bounds.left))
+    const right = Math.max(...boundsList.map((bounds) => bounds.right))
+    const top = Math.min(...boundsList.map((bounds) => bounds.top))
+    const bottom = Math.max(...boundsList.map((bounds) => bounds.bottom))
+    return { left, right, top, bottom, width: right - left, height: bottom - top }
   }
 
   drawSelection() {
@@ -469,33 +506,32 @@ export class EditorScene extends Phaser.Scene {
       return
     }
 
-    if (this.selectedIds.size === 1) {
-      const [selectedId] = this.selectedIds
-      const element = this.elements.find((el) => el.id === selectedId)
-      if (!element) {
-        this.setHandlesVisible(false)
-        return
-      }
-
-      const bounds = element.gameObject.getBounds()
-      this.selectionGraphics.lineStyle(2, SELECTION_COLOR, 1)
-      this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
-      this.positionHandles(bounds)
-      this.setHandlesVisible(true)
+    const selected = this.elements.filter((element) => this.selectedIds.has(element.id))
+    if (selected.length === 0) {
+      this.setHandlesVisible(false)
       return
     }
 
-    // Multiple selected: outline each one individually. Group resize isn't
-    // supported yet, so no handles here — just the click/drag/align/delete
-    // affordances multi-selection already gives.
-    this.setHandlesVisible(false)
     this.selectionGraphics.lineStyle(2, SELECTION_COLOR, 1)
-    for (const id of this.selectedIds) {
-      const element = this.elements.find((el) => el.id === id)
-      if (!element) continue
-      const bounds = element.gameObject.getBounds()
-      this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+
+    if (selected.length > 1) {
+      // Outline each element individually in addition to the group bounds
+      // below, so it's clear exactly what's selected inside the group.
+      for (const element of selected) {
+        const bounds = element.gameObject.getBounds()
+        this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+      }
     }
+
+    const groupBounds = this.getBoundsUnion(selected)
+    this.selectionGraphics.strokeRect(
+      groupBounds.left,
+      groupBounds.top,
+      groupBounds.width,
+      groupBounds.height,
+    )
+    this.positionHandles(groupBounds)
+    this.setHandlesVisible(true)
   }
 
   positionHandles(bounds) {
