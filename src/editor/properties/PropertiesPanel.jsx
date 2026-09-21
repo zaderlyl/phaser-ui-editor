@@ -121,6 +121,10 @@ export function PropertiesPanel({
     onChange(id, { text: event.target.value })
   }
 
+  const handleCheckboxChange = (key) => (event) => {
+    onChange(id, { [key]: event.target.checked })
+  }
+
   return (
     <aside className="properties-panel">
       <h2 className="properties-panel__title">Propriétés</h2>
@@ -166,6 +170,26 @@ export function PropertiesPanel({
             value={props.fontSize}
             onChange={handleNumberChange('fontSize')}
           />
+        </div>
+      )}
+
+      {'bold' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Style</span>
+          <div className="properties-panel__row">
+            <label className="properties-panel__checkbox">
+              <input type="checkbox" checked={props.bold} onChange={handleCheckboxChange('bold')} />
+              Gras
+            </label>
+            <label className="properties-panel__checkbox">
+              <input
+                type="checkbox"
+                checked={props.italic}
+                onChange={handleCheckboxChange('italic')}
+              />
+              Italique
+            </label>
+          </div>
         </div>
       )}
 

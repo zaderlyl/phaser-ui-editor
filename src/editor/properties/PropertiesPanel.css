@@ -47,6 +47,20 @@
   font-size: 0.75rem;
 }
 
+.properties-panel__row .properties-panel__checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.375rem;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.properties-panel__checkbox input[type='checkbox'] {
+  width: auto;
+  margin: 0;
+}
+
 .properties-panel__multi-count {
   margin: 0 0 1rem;
   font-size: 0.85rem;

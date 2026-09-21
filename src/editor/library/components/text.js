@@ -1,13 +1,16 @@
 // Texte: a plain text label. Matches the cahier des charges' "Texte"
-// component: position X/Y, contenu, taille de police, couleur. Kept simple
-// for now — no resize handling (Phaser.GameObjects.Text auto-sizes from its
-// content/font, see EditorScene.resizeSelected's setSize guard).
+// component: position X/Y, contenu, taille de police, couleur, gras/italique.
+// Kept simple for now — no resize handling (Phaser.GameObjects.Text
+// auto-sizes from its own content/font, see EditorScene.resizeSelected's
+// setSize guard).
 const defaultProps = {
   x: 0,
   y: 0,
   text: 'Texte',
   fontSize: 24,
   color: 0xffffff,
+  bold: false,
+  italic: false,
   originX: 0,
   originY: 0,
 }
@@ -20,10 +23,23 @@ function toCssColor(colorNumber) {
   return `#${colorNumber.toString(16).padStart(6, '0')}`
 }
 
+// bold/italic are two separate checkboxes in the properties panel, but
+// Phaser's Text style takes them as one combined CSS font-style string.
+function toFontStyle(bold, italic) {
+  if (bold && italic) return 'bold italic'
+  if (bold) return 'bold'
+  if (italic) return 'italic'
+  return 'normal'
+}
+
 function create(scene, props) {
-  const { x, y, text, fontSize, color, originX, originY } = props
+  const { x, y, text, fontSize, color, bold, italic, originX, originY } = props
   return scene.add
-    .text(x, y, text, { fontSize: `${fontSize}px`, color: toCssColor(color) })
+    .text(x, y, text, {
+      fontSize: `${fontSize}px`,
+      color: toCssColor(color),
+      fontStyle: toFontStyle(bold, italic),
+    })
     .setOrigin(originX, originY)
 }
 
@@ -34,8 +50,9 @@ function escapeText(text) {
 }
 
 function generateCode({ props }) {
-  const { name, x, y, text, fontSize, color, originX, originY } = props
-  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}' }).setOrigin(${originX}, ${originY});`
+  const { name, x, y, text, fontSize, color, bold, italic, originX, originY } = props
+  const fontStyle = toFontStyle(bold, italic)
+  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}' }).setOrigin(${originX}, ${originY});`
 }
 
 export const textComponent = {

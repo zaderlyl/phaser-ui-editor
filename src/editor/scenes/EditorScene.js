@@ -678,9 +678,23 @@ export class EditorScene extends Phaser.Scene {
     if ('fontSize' in patch && typeof gameObject.setFontSize === 'function') {
       gameObject.setFontSize(element.props.fontSize)
     }
+    if (('bold' in patch || 'italic' in patch) && typeof gameObject.setFontStyle === 'function') {
+      // Two separate checkboxes in the properties panel, one combined CSS
+      // font-style string for Phaser's Text (see text.js's toFontStyle).
+      const { bold, italic } = element.props
+      const fontStyle = bold && italic ? 'bold italic' : bold ? 'bold' : italic ? 'italic' : 'normal'
+      gameObject.setFontStyle(fontStyle)
+    }
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
+    // A properties-panel edit happens once per discrete input (a keystroke,
+    // a checkbox toggle) rather than per animation-frame tick like a drag,
+    // so unlike resizeSelected there's no perf reason to skip this — and
+    // without it the layers panel and code export kept reading whatever
+    // this element's props were before the edit (see dragend's identical
+    // fix for the same staleness on drag/resize).
+    this.events.emit('elementsChange', this.getElementsSnapshot())
   }
 
   // Renames an element after validating it as a JS identifier (it becomes
