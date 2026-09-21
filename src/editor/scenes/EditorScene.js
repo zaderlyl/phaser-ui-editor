@@ -3,6 +3,12 @@ import { componentLibrary } from '../library/registry'
 
 const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
+// Extra invisible margin around each handle's visual size, purely for
+// hit-testing: at HANDLE_SIZE alone, missing the handle by just a few
+// pixels (easy at typical cursor precision, worse on a CSS-scaled-down
+// canvas) grabs whatever's underneath instead — for a grouped element,
+// that misreads as "move the group" instead of "resize it".
+const HANDLE_HIT_PADDING = 8
 const MIN_ELEMENT_SIZE = 10
 const CORNERS = ['tl', 'tr', 'bl', 'br']
 // Matches a valid JS identifier — the generated code will use this name
@@ -64,7 +70,14 @@ export class EditorScene extends Phaser.Scene {
         .setVisible(false)
       handle.setData('isHandle', true)
       handle.setData('corner', corner)
-      handle.setInteractive({ useHandCursor: true })
+      // A hitArea larger than the visible square, centered on the same
+      // point — see HANDLE_HIT_PADDING above.
+      const hitSize = HANDLE_SIZE + HANDLE_HIT_PADDING * 2
+      handle.setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(-HANDLE_HIT_PADDING, -HANDLE_HIT_PADDING, hitSize, hitSize),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        useHandCursor: true,
+      })
       handle.input.enabled = false
       this.input.setDraggable(handle)
       return handle
