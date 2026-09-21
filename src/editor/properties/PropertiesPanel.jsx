@@ -117,6 +117,10 @@ export function PropertiesPanel({
     onChange(id, { color: hexToColorNumber(event.target.value) })
   }
 
+  const handleStrokeColorChange = (event) => {
+    onChange(id, { strokeColor: hexToColorNumber(event.target.value) })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -249,6 +253,31 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Couleur</span>
           <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
+        </div>
+      )}
+
+      {'strokeThickness' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Contour</span>
+          <div className="properties-panel__row">
+            <label>
+              Épaisseur
+              <input
+                type="number"
+                min="0"
+                value={props.strokeThickness}
+                onChange={handleNumberChange('strokeThickness')}
+              />
+            </label>
+            <label>
+              Couleur
+              <input
+                type="color"
+                value={colorNumberToHex(props.strokeColor)}
+                onChange={handleStrokeColorChange}
+              />
+            </label>
+          </div>
         </div>
       )}
 

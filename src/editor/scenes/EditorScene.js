@@ -696,6 +696,13 @@ export class EditorScene extends Phaser.Scene {
     if ('align' in patch && typeof gameObject.setAlign === 'function') {
       gameObject.setAlign(element.props.align)
     }
+    if (
+      ('strokeColor' in patch || 'strokeThickness' in patch) &&
+      typeof gameObject.setStroke === 'function'
+    ) {
+      const { strokeColor, strokeThickness } = element.props
+      gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+    }
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
