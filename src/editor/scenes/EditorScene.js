@@ -657,6 +657,29 @@ export class EditorScene extends Phaser.Scene {
       const elTop = top + relTop * scaleY
 
       const { gameObject } = element
+
+      if (element.type === 'group') {
+        // A group's Container has no meaningful origin (x/y is already its
+        // local (0,0), i.e. its own top-left) and setSize() only affects
+        // hit-testing, not how it looks — setScale() is what actually
+        // stretches its children visually. The resize snapshot's width/
+        // height are the CURRENT (already-scaled) bounds, so the relative
+        // factor for *this* drag (elWidth / width) has to be combined with
+        // whatever scale the container already had, not replace it.
+        const relativeScaleX = elWidth / width
+        const relativeScaleY = elHeight / height
+        gameObject.setScale(gameObject.scaleX * relativeScaleX, gameObject.scaleY * relativeScaleY)
+        gameObject.x = elLeft
+        gameObject.y = elTop
+        // No props.width/height for a group: the properties panel would
+        // render them as plain number inputs wired to updateElementProps'
+        // setSize() path, which wouldn't visually rescale a Container the
+        // way setScale() does here — leaving them out avoids that mismatch.
+        element.props.x = gameObject.x
+        element.props.y = gameObject.y
+        continue
+      }
+
       gameObject.setSize(elWidth, elHeight)
       gameObject.x = elLeft + gameObject.originX * elWidth
       gameObject.y = elTop + gameObject.originY * elHeight
