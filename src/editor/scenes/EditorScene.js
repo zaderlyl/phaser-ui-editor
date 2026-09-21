@@ -266,9 +266,19 @@ export class EditorScene extends Phaser.Scene {
 
     this.input.on('dragend', (_pointer, gameObject) => {
       this.groupDragRedirect = null
-      if (gameObject !== this.background) return
-      this.marqueeGraphics.clear()
-      this.marqueeStart = null
+      if (gameObject === this.background) {
+        this.marqueeGraphics.clear()
+        this.marqueeStart = null
+        return
+      }
+      // Every other drag (element move, group move, resize) touched
+      // position and/or size, but the live 'elementchange'/'elementsChange'
+      // emitted mid-drag (see 'drag' above and resizeSelected) only cover
+      // the moved/resized element(s) — cheap per-tick updates meant for the
+      // properties panel, not a full sync. Consumers that need the whole
+      // list current (the layers panel, code export) only get one once the
+      // drag actually settles here.
+      this.events.emit('elementsChange', this.getElementsSnapshot())
     })
 
     // Delete/Backspace removes every selected element — but only when the
@@ -422,7 +432,7 @@ export class EditorScene extends Phaser.Scene {
       id: groupId,
       type: 'group',
       parentId: null,
-      props: { name: `group${this.typeCounters.group}`, x: bounds.left, y: bounds.top },
+      props: { name: `group${this.typeCounters.group}`, x: bounds.left, y: bounds.top, scaleX: 1, scaleY: 1 },
       gameObject: container,
     }
     this.elements.push(groupElement)
@@ -841,8 +851,13 @@ export class EditorScene extends Phaser.Scene {
         // render them as plain number inputs wired to updateElementProps'
         // setSize() path, which wouldn't visually rescale a Container the
         // way setScale() does here — leaving them out avoids that mismatch.
+        // scaleX/Y IS tracked, though — it's how the exported code (see
+        // generateScreenClass) reproduces this same visual stretch via a
+        // real Container.setScale() call.
         element.props.x = gameObject.x
         element.props.y = gameObject.y
+        element.props.scaleX = gameObject.scaleX
+        element.props.scaleY = gameObject.scaleY
         continue
       }
 
