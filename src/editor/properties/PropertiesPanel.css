@@ -69,7 +69,8 @@
 }
 
 .properties-panel__group input[type='number'],
-.properties-panel__group input[type='text'] {
+.properties-panel__group input[type='text'],
+.properties-panel__group textarea {
   width: 100%;
   box-sizing: border-box;
   padding: 0.3rem 0.4rem;
@@ -78,6 +79,8 @@
   border-radius: 4px;
   color: #e5e7eb;
   font-size: 0.85rem;
+  font-family: inherit;
+  resize: vertical;
 }
 
 .properties-panel__input--error {

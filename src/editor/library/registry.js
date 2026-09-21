@@ -1,5 +1,6 @@
 import { panelComponent } from './components/panel'
+import { textComponent } from './components/text'
 
 // Registry of component types available in the library panel and placeable on
 // the canvas. Each entry: { type, label, defaultProps, create(scene, props) }.
-export const componentLibrary = [panelComponent]
+export const componentLibrary = [panelComponent, textComponent]

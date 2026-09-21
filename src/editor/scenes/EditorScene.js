@@ -662,8 +662,21 @@ export class EditorScene extends Phaser.Scene {
     if ('width' in patch || 'height' in patch) {
       gameObject.setSize(element.props.width, element.props.height)
     }
-    if ('color' in patch && typeof gameObject.setFillStyle === 'function') {
-      gameObject.setFillStyle(element.props.color)
+    if ('color' in patch) {
+      // props.color is always a 0xRRGGBB number (see the color picker in
+      // PropertiesPanel), but a Rectangle and a Text take it differently —
+      // a Rectangle's fill vs. Text's CSS-string style color.
+      if (typeof gameObject.setFillStyle === 'function') {
+        gameObject.setFillStyle(element.props.color)
+      } else if (typeof gameObject.setColor === 'function') {
+        gameObject.setColor(`#${element.props.color.toString(16).padStart(6, '0')}`)
+      }
+    }
+    if ('text' in patch && typeof gameObject.setText === 'function') {
+      gameObject.setText(element.props.text)
+    }
+    if ('fontSize' in patch && typeof gameObject.setFontSize === 'function') {
+      gameObject.setFontSize(element.props.fontSize)
     }
 
     this.drawSelection()
@@ -861,12 +874,21 @@ export class EditorScene extends Phaser.Scene {
         continue
       }
 
-      gameObject.setSize(elWidth, elHeight)
+      // Only touch size for element types that actually declare width/height
+      // in their props (a Panel does, Text doesn't — it auto-sizes from its
+      // own content/font). Gating on the props schema rather than probing
+      // gameObject.setSize avoids two issues: Text's setSize() exists but
+      // only sets the hit-area bookkeeping (it doesn't visually resize the
+      // text, since that's recomputed from the canvas on the next style
+      // change), and injecting width/height into a Text's props would make
+      // the properties panel show a "Taille" field that does nothing.
+      if ('width' in element.props) {
+        gameObject.setSize(elWidth, elHeight)
+        element.props.width = elWidth
+        element.props.height = elHeight
+      }
       gameObject.x = elLeft + gameObject.originX * elWidth
       gameObject.y = elTop + gameObject.originY * elHeight
-
-      element.props.width = elWidth
-      element.props.height = elHeight
       element.props.x = gameObject.x
       element.props.y = gameObject.y
     }

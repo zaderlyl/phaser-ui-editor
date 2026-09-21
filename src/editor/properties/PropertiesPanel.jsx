@@ -117,6 +117,10 @@ export function PropertiesPanel({
     onChange(id, { color: hexToColorNumber(event.target.value) })
   }
 
+  const handleTextChange = (event) => {
+    onChange(id, { text: event.target.value })
+  }
+
   return (
     <aside className="properties-panel">
       <h2 className="properties-panel__title">Propriétés</h2>
@@ -145,6 +149,25 @@ export function PropertiesPanel({
           </label>
         </div>
       </div>
+
+      {'text' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Contenu</span>
+          <textarea value={props.text} onChange={handleTextChange} rows={3} />
+        </div>
+      )}
+
+      {'fontSize' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Taille de police</span>
+          <input
+            type="number"
+            min="1"
+            value={props.fontSize}
+            onChange={handleNumberChange('fontSize')}
+          />
+        </div>
+      )}
 
       {'width' in props && (
         <div className="properties-panel__group">
