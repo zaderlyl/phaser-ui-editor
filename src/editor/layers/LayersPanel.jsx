@@ -44,7 +44,7 @@ export function LayersPanel({ elements, selectedIds, onSelect, onReorder }) {
               onDragStart={handleDragStart(element.id)}
               onDragOver={handleDragOver}
               onDrop={handleDrop(element.id)}
-              onClick={() => onSelect(element.id)}
+              onClick={(event) => onSelect(element.id, { additive: event.shiftKey })}
               className={
                 'layers-panel__item' +
                 (selectedIds.includes(element.id) ? ' layers-panel__item--selected' : '')

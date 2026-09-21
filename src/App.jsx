@@ -33,8 +33,8 @@ function App() {
     sceneRef.current?.removeSelectedElements()
   }, [])
 
-  const handleSelect = useCallback((id) => {
-    sceneRef.current?.selectElement(id)
+  const handleSelect = useCallback((id, options) => {
+    sceneRef.current?.selectElement(id, options)
   }, [])
 
   const handleReorder = useCallback((orderedIds) => {
