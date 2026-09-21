@@ -173,6 +173,14 @@ export class EditorScene extends Phaser.Scene {
             relTop: elBounds.top - bounds.top,
             width: elBounds.width,
             height: elBounds.height,
+            // For a group: its scale *before this drag started*. 'drag'
+            // fires on every pointer move, each tick recomputing the full
+            // absolute size from this same fixed snapshot — reading the
+            // group's *current* (already-updated-by-the-previous-tick)
+            // scale instead would compound it further on every tick,
+            // growing exponentially instead of tracking the pointer.
+            startScaleX: element.gameObject.scaleX ?? 1,
+            startScaleY: element.gameObject.scaleY ?? 1,
           }
         })
         return
@@ -663,7 +671,15 @@ export class EditorScene extends Phaser.Scene {
     const scaleX = newWidth / this.resizeStartBounds.width
     const scaleY = newHeight / this.resizeStartBounds.height
 
-    for (const { element, relLeft, relTop, width, height } of this.resizeSnapshot) {
+    for (const {
+      element,
+      relLeft,
+      relTop,
+      width,
+      height,
+      startScaleX,
+      startScaleY,
+    } of this.resizeSnapshot) {
       const elWidth = Math.max(MIN_ELEMENT_SIZE, width * scaleX)
       const elHeight = Math.max(MIN_ELEMENT_SIZE, height * scaleY)
       const elLeft = left + relLeft * scaleX
@@ -675,13 +691,12 @@ export class EditorScene extends Phaser.Scene {
         // A group's Container has no meaningful origin (x/y is already its
         // local (0,0), i.e. its own top-left) and setSize() only affects
         // hit-testing, not how it looks — setScale() is what actually
-        // stretches its children visually. The resize snapshot's width/
-        // height are the CURRENT (already-scaled) bounds, so the relative
-        // factor for *this* drag (elWidth / width) has to be combined with
-        // whatever scale the container already had, not replace it.
-        const relativeScaleX = elWidth / width
-        const relativeScaleY = elHeight / height
-        gameObject.setScale(gameObject.scaleX * relativeScaleX, gameObject.scaleY * relativeScaleY)
+        // stretches its children visually. 'drag' fires on every pointer
+        // move, each tick recomputing the FULL absolute scale from the
+        // snapshot taken at dragstart (startScaleX/Y) — never from the
+        // container's *current* scale, which the previous tick already
+        // updated and would compound exponentially if reused here.
+        gameObject.setScale((elWidth / width) * startScaleX, (elHeight / height) * startScaleY)
         gameObject.x = elLeft
         gameObject.y = elTop
         // No props.width/height for a group: the properties panel would
