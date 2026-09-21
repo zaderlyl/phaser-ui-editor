@@ -1,11 +1,16 @@
-// Texte: a plain text label. Matches the cahier des charges' "Texte"
-// component: position X/Y, contenu, taille de police, couleur, gras/italique,
-// alignement. Kept simple for now — no resize handling (Phaser.GameObjects.Text
-// auto-sizes from its own content/font, see EditorScene.resizeSelected's
-// setSize guard).
+// Texte: a real text BOX, not just a label — position X/Y, width/height,
+// contenu, taille de police, couleur, gras/italique, alignement. Alignment
+// only means anything once the content can wrap inside a fixed-size area,
+// so this uses Phaser's word-wrap + setFixedSize (a canvas cropped/padded
+// to an exact size, independent of content) rather than Text's default
+// auto-sizing — which is also what makes it draggable through the same
+// resize handles every other sized component already uses (see
+// EditorScene.resizeSelected/updateElementProps's setFixedSize branch).
 const defaultProps = {
   x: 0,
   y: 0,
+  width: 200,
+  height: 100,
   text: 'Texte',
   fontSize: 24,
   color: 0xffffff,
@@ -34,15 +39,19 @@ function toFontStyle(bold, italic) {
 }
 
 function create(scene, props) {
-  const { x, y, text, fontSize, color, bold, italic, align, originX, originY } = props
-  return scene.add
+  const { x, y, width, height, text, fontSize, color, bold, italic, align, originX, originY } =
+    props
+  const textObject = scene.add
     .text(x, y, text, {
       fontSize: `${fontSize}px`,
       color: toCssColor(color),
       fontStyle: toFontStyle(bold, italic),
       align,
+      wordWrap: { width, useAdvancedWrap: true },
     })
     .setOrigin(originX, originY)
+  textObject.setFixedSize(width, height)
+  return textObject
 }
 
 // Escapes the content for a single-quoted JS string literal — the only
@@ -52,9 +61,10 @@ function escapeText(text) {
 }
 
 function generateCode({ props }) {
-  const { name, x, y, text, fontSize, color, bold, italic, align, originX, originY } = props
+  const { name, x, y, width, height, text, fontSize, color, bold, italic, align, originX, originY } =
+    props
   const fontStyle = toFontStyle(bold, italic)
-  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}' }).setOrigin(${originX}, ${originY});`
+  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}', wordWrap: { width: ${Math.round(width)}, useAdvancedWrap: true } }).setOrigin(${originX}, ${originY}).setFixedSize(${Math.round(width)}, ${Math.round(height)});`
 }
 
 export const textComponent = {

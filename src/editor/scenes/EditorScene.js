@@ -660,7 +660,15 @@ export class EditorScene extends Phaser.Scene {
       gameObject.setPosition(element.props.x, element.props.y)
     }
     if ('width' in patch || 'height' in patch) {
-      gameObject.setSize(element.props.width, element.props.height)
+      // A Rectangle's setSize() IS its visual size, but Text has its own
+      // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
+      // only touches hit-area bookkeeping, not what's actually drawn.
+      if (typeof gameObject.setFixedSize === 'function') {
+        gameObject.setWordWrapWidth(element.props.width, true)
+        gameObject.setFixedSize(element.props.width, element.props.height)
+      } else {
+        gameObject.setSize(element.props.width, element.props.height)
+      }
     }
     if ('color' in patch) {
       // props.color is always a 0xRRGGBB number (see the color picker in
@@ -892,15 +900,17 @@ export class EditorScene extends Phaser.Scene {
       }
 
       // Only touch size for element types that actually declare width/height
-      // in their props (a Panel does, Text doesn't — it auto-sizes from its
-      // own content/font). Gating on the props schema rather than probing
-      // gameObject.setSize avoids two issues: Text's setSize() exists but
-      // only sets the hit-area bookkeeping (it doesn't visually resize the
-      // text, since that's recomputed from the canvas on the next style
-      // change), and injecting width/height into a Text's props would make
-      // the properties panel show a "Taille" field that does nothing.
+      // in their props (a group doesn't — see the `continue` above). A
+      // Rectangle's setSize() IS its visual size, but Text has its own
+      // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
+      // only touches hit-area bookkeeping, not what's actually drawn.
       if ('width' in element.props) {
-        gameObject.setSize(elWidth, elHeight)
+        if (typeof gameObject.setFixedSize === 'function') {
+          gameObject.setWordWrapWidth(elWidth, true)
+          gameObject.setFixedSize(elWidth, elHeight)
+        } else {
+          gameObject.setSize(elWidth, elHeight)
+        }
         element.props.width = elWidth
         element.props.height = elHeight
       }
