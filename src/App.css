@@ -58,9 +58,25 @@
 }
 
 .phaser-canvas {
+  position: relative;
   max-width: 100%;
   max-height: 100%;
   display: flex;
+}
+
+/* Inline text-editing overlay (see PhaserCanvas's 'starttextedit' handler)
+   — positioned in absolute pixels computed from the canvas's own current
+   CSS scale, so it lines up with the hidden Text GameObject underneath. */
+.phaser-canvas__text-editor {
+  position: absolute;
+  box-sizing: border-box;
+  margin: 0;
+  border: 1px solid #60a5fa;
+  background: #1d1f27;
+  font-family: inherit;
+  line-height: 1.2;
+  resize: none;
+  outline: none;
 }
 
 /*

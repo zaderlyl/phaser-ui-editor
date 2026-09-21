@@ -94,6 +94,10 @@ export class EditorScene extends Phaser.Scene {
     // moves) the whole group instead — double-clicking the same child
     // within 300ms enters that group, so it and its siblings can be
     // selected/dragged individually until you click something else.
+    //
+    // Double-clicking a text element (top-level, or a child once entered)
+    // opens it for inline editing instead — same 300ms/same-id detection,
+    // shared across every branch below rather than only the group-child one.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
       if (gameObject.getData('isHandle')) return
 
@@ -109,10 +113,15 @@ export class EditorScene extends Phaser.Scene {
       }
 
       const element = this.elements.find((el) => el.id === elementId)
+      const now = performance.now()
+      const isDoubleClick = this.lastClickedId === elementId && now - this.lastClickTime < 300
+      this.lastClickedId = elementId
+      this.lastClickTime = now
 
       if (element?.parentId && element.parentId === this.enteredGroupId) {
         // Child of the group we're already inside — select it directly.
         this.selectElement(elementId, { additive })
+        if (isDoubleClick && element.type === 'text') this.startEditingText(elementId)
         return
       }
 
@@ -121,15 +130,11 @@ export class EditorScene extends Phaser.Scene {
         // directly, and we're no longer "inside" any specific group.
         this.enteredGroupId = null
         this.selectElement(elementId, { additive })
+        if (isDoubleClick && element.type === 'text') this.startEditingText(elementId)
         return
       }
 
       // A child of a group we haven't entered yet.
-      const now = performance.now()
-      const isDoubleClick = this.lastClickedId === elementId && now - this.lastClickTime < 300
-      this.lastClickedId = elementId
-      this.lastClickTime = now
-
       if (isDoubleClick) {
         this.enteredGroupId = element.parentId
         this.selectElement(elementId, { additive })
@@ -657,6 +662,44 @@ export class EditorScene extends Phaser.Scene {
     if (typeof definition?.applyTextLayout !== 'function') return false
     definition.applyTextLayout(element.gameObject, element.props)
     return true
+  }
+
+  // Double-clicking a text element opens it for inline editing: the actual
+  // <textarea> overlay is DOM, not Phaser, so it's PhaserCanvas.jsx that
+  // owns it — this just hides the live Text (so it's not rendered twice)
+  // and hands up everything needed to position and style a matching
+  // overlay (world bounds, current content, font size, color, alignment).
+  startEditingText(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'text') return
+
+    element.gameObject.setVisible(false)
+    const bounds = element.gameObject.getBounds()
+    this.events.emit('starttextedit', {
+      id,
+      text: element.props.text,
+      bounds: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height },
+      fontSize: element.props.fontSize,
+      color: element.props.color,
+      align: element.props.align,
+      padding: element.props.padding,
+    })
+  }
+
+  // Commits the overlay's edited text (Enter/blur in PhaserCanvas.jsx) and
+  // makes the live Text visible again.
+  commitTextEdit(id, text) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return
+    element.gameObject.setVisible(true)
+    this.updateElementProps(id, { text })
+  }
+
+  // Discards the overlay (Escape) without touching the element's content.
+  cancelTextEdit(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return
+    element.gameObject.setVisible(true)
   }
 
   // Applies a partial props update (e.g. from the properties panel) to an
