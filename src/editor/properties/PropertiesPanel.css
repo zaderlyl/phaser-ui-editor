@@ -47,6 +47,27 @@
   font-size: 0.75rem;
 }
 
+.properties-panel__multi-count {
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
+  color: #9ca3af;
+}
+
+.properties-panel__row button {
+  flex: 1 1 0;
+  padding: 0.35rem 0.4rem;
+  background: #1d1f27;
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.properties-panel__row button:hover {
+  background: #262933;
+}
+
 .properties-panel__group input[type='number'],
 .properties-panel__group input[type='text'] {
   width: 100%;

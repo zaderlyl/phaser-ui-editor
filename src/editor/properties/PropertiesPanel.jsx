@@ -9,29 +9,31 @@ function hexToColorNumber(hex) {
   return Number.parseInt(hex.slice(1), 16)
 }
 
-// Basic name/position/size/color editor for the selected element. Position,
-// size and color edits flow through EditorScene.updateElementProps, which
-// re-renders the GameObject and emits the updated snapshot back — so the
-// canvas stays the source of truth and this panel just reflects it.
-// The name field is different: it can be invalid mid-edit (not a valid JS
-// identifier yet, or a duplicate), so it keeps its own draft state instead
-// of always mirroring props.name, and only commits through
-// EditorScene.renameElement when the entered name actually validates.
-export function PropertiesPanel({ element, onChange, onRename, onDelete }) {
+// Name/position/size/color editor for the selection. Position, size and
+// color edits flow through EditorScene.updateElementProps, which re-renders
+// the GameObject and emits the updated snapshot back — so the canvas stays
+// the source of truth and this panel just reflects it. With zero elements
+// selected it shows an empty state; with exactly one, the full field set;
+// with several, a lighter view (count + align tools + bulk delete), since
+// there's no single coherent set of fields to edit across different
+// elements yet.
+export function PropertiesPanel({ elements, onChange, onRename, onDelete, onDeleteSelected, onAlign }) {
+  const single = elements.length === 1 ? elements[0] : null
+
   // Reset the name draft during render when the selection changes (the
   // React-documented way to adjust state from a prop change without the
   // extra render pass an effect would cost here).
-  const [trackedId, setTrackedId] = useState(element?.id)
-  const [nameDraft, setNameDraft] = useState(element?.props.name ?? '')
+  const [trackedId, setTrackedId] = useState(single?.id)
+  const [nameDraft, setNameDraft] = useState(single?.props.name ?? '')
   const [nameError, setNameError] = useState(null)
 
-  if (element?.id !== trackedId) {
-    setTrackedId(element?.id)
-    setNameDraft(element?.props.name ?? '')
+  if (single?.id !== trackedId) {
+    setTrackedId(single?.id)
+    setNameDraft(single?.props.name ?? '')
     setNameError(null)
   }
 
-  if (!element) {
+  if (elements.length === 0) {
     return (
       <aside className="properties-panel">
         <h2 className="properties-panel__title">Propriétés</h2>
@@ -40,7 +42,50 @@ export function PropertiesPanel({ element, onChange, onRename, onDelete }) {
     )
   }
 
-  const { id, props } = element
+  if (elements.length > 1) {
+    return (
+      <aside className="properties-panel">
+        <h2 className="properties-panel__title">Propriétés</h2>
+        <p className="properties-panel__multi-count">{elements.length} éléments sélectionnés</p>
+
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Aligner horizontalement</span>
+          <div className="properties-panel__row">
+            <button type="button" onClick={() => onAlign('left')}>
+              Gauche
+            </button>
+            <button type="button" onClick={() => onAlign('centerH')}>
+              Centre
+            </button>
+            <button type="button" onClick={() => onAlign('right')}>
+              Droite
+            </button>
+          </div>
+        </div>
+
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Aligner verticalement</span>
+          <div className="properties-panel__row">
+            <button type="button" onClick={() => onAlign('top')}>
+              Haut
+            </button>
+            <button type="button" onClick={() => onAlign('centerV')}>
+              Centre
+            </button>
+            <button type="button" onClick={() => onAlign('bottom')}>
+              Bas
+            </button>
+          </div>
+        </div>
+
+        <button type="button" className="properties-panel__delete" onClick={onDeleteSelected}>
+          Supprimer ({elements.length})
+        </button>
+      </aside>
+    )
+  }
+
+  const { id, props } = single
 
   const handleNameChange = (event) => {
     const value = event.target.value
@@ -117,11 +162,7 @@ export function PropertiesPanel({ element, onChange, onRename, onDelete }) {
         <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
       </div>
 
-      <button
-        type="button"
-        className="properties-panel__delete"
-        onClick={() => onDelete(id)}
-      >
+      <button type="button" className="properties-panel__delete" onClick={() => onDelete(id)}>
         Supprimer
       </button>
     </aside>
