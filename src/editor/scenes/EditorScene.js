@@ -216,7 +216,7 @@ export class EditorScene extends Phaser.Scene {
       }
 
       if (gameObject.getData('isHandle')) {
-        this.resizeSelected(gameObject, dragX, dragY)
+        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey)
         return
       }
 
@@ -655,21 +655,33 @@ export class EditorScene extends Phaser.Scene {
   // selected element this just resizes it directly; with several, every
   // element is scaled proportionally to how the overall group bounds
   // changed, keeping their relative position/size within the group.
-  resizeSelected(handle, dragX, dragY) {
+  // Holding shift locks the aspect ratio: both axes scale by the larger of
+  // the two raw factors, so the anchored corner still stays put but the
+  // shape grows/shrinks uniformly instead of stretching.
+  resizeSelected(handle, dragX, dragY, keepAspectRatio = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
     const fixedX = handle.getData('fixedX')
     const fixedY = handle.getData('fixedY')
+    const corner = handle.getData('corner')
+    const anchorIsLeft = corner.includes('r')
+    const anchorIsTop = corner.includes('b')
 
-    const left = Math.min(fixedX, dragX)
-    const right = Math.max(fixedX, dragX)
-    const top = Math.min(fixedY, dragY)
-    const bottom = Math.max(fixedY, dragY)
+    const rawWidth = Math.max(MIN_ELEMENT_SIZE, Math.abs(dragX - fixedX))
+    const rawHeight = Math.max(MIN_ELEMENT_SIZE, Math.abs(dragY - fixedY))
 
-    const newWidth = Math.max(MIN_ELEMENT_SIZE, right - left)
-    const newHeight = Math.max(MIN_ELEMENT_SIZE, bottom - top)
-    const scaleX = newWidth / this.resizeStartBounds.width
-    const scaleY = newHeight / this.resizeStartBounds.height
+    let scaleX = rawWidth / this.resizeStartBounds.width
+    let scaleY = rawHeight / this.resizeStartBounds.height
+    if (keepAspectRatio) {
+      const uniformScale = Math.max(scaleX, scaleY)
+      scaleX = uniformScale
+      scaleY = uniformScale
+    }
+
+    const newWidth = Math.max(MIN_ELEMENT_SIZE, this.resizeStartBounds.width * scaleX)
+    const newHeight = Math.max(MIN_ELEMENT_SIZE, this.resizeStartBounds.height * scaleY)
+    const left = anchorIsLeft ? fixedX : fixedX - newWidth
+    const top = anchorIsTop ? fixedY : fixedY - newHeight
 
     for (const {
       element,
