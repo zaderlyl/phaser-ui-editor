@@ -1,12 +1,48 @@
+import { useState } from 'react'
 import './LayersPanel.css'
 
-// Lists placed elements front-to-back (top of the list = frontmost, like
-// Figma), lets you select one by clicking it, and reorder depth by dragging
-// a row onto another. EditorScene.elements is the source of truth for
-// order (back to front); dropping onto a row places the dragged element
-// just behind it in that order.
+// Lists placed elements as a tree: top-level elements front-to-back (top of
+// the list = frontmost, like Figma), with a group's children indented
+// beneath it when expanded. EditorScene.elements is a flat list with a
+// parentId per element — this just groups them by that for display; reorder
+// (drag) still only operates on top-level siblings for now, dragging a
+// child within/out of its group isn't supported yet.
 export function LayersPanel({ elements, selectedIds, onSelect, onReorder }) {
-  const frontToBack = [...elements].reverse()
+  // Tracks *collapsed* groups rather than expanded ones, so a newly created
+  // group (not in this set yet) starts expanded — you see what you just
+  // grouped without an extra click.
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState(new Set())
+
+  const childrenByParent = new Map()
+  for (const element of elements) {
+    if (!element.parentId) continue
+    if (!childrenByParent.has(element.parentId)) childrenByParent.set(element.parentId, [])
+    childrenByParent.get(element.parentId).push(element)
+  }
+
+  const roots = elements.filter((element) => !element.parentId)
+  const rows = []
+  for (const element of [...roots].reverse()) {
+    rows.push({ element, depth: 0 })
+    const children = childrenByParent.get(element.id)
+    if (children && !collapsedGroupIds.has(element.id)) {
+      for (const child of [...children].reverse()) {
+        rows.push({ element: child, depth: 1 })
+      }
+    }
+  }
+
+  const toggleExpanded = (id) => {
+    setCollapsedGroupIds((current) => {
+      const next = new Set(current)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
 
   const handleDragStart = (id) => (event) => {
     event.dataTransfer.setData('text/plain', id)
@@ -37,22 +73,42 @@ export function LayersPanel({ elements, selectedIds, onSelect, onReorder }) {
         <p className="layers-panel__empty">Aucun calque</p>
       ) : (
         <ul className="layers-panel__list">
-          {frontToBack.map((element) => (
-            <li
-              key={element.id}
-              draggable
-              onDragStart={handleDragStart(element.id)}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop(element.id)}
-              onClick={(event) => onSelect(element.id, { additive: event.shiftKey })}
-              className={
-                'layers-panel__item' +
-                (selectedIds.includes(element.id) ? ' layers-panel__item--selected' : '')
-              }
-            >
-              {element.props.name}
-            </li>
-          ))}
+          {rows.map(({ element, depth }) => {
+            const isGroup = element.type === 'group'
+            const hasChildren = childrenByParent.has(element.id)
+            const isTopLevel = depth === 0
+
+            return (
+              <li
+                key={element.id}
+                draggable={isTopLevel}
+                onDragStart={isTopLevel ? handleDragStart(element.id) : undefined}
+                onDragOver={isTopLevel ? handleDragOver : undefined}
+                onDrop={isTopLevel ? handleDrop(element.id) : undefined}
+                onClick={(event) => onSelect(element.id, { additive: event.shiftKey })}
+                className={
+                  'layers-panel__item' +
+                  (isGroup ? ' layers-panel__item--group' : '') +
+                  (selectedIds.includes(element.id) ? ' layers-panel__item--selected' : '')
+                }
+                style={{ paddingLeft: `${0.5 + depth * 1}rem` }}
+              >
+                {hasChildren && (
+                  <button
+                    type="button"
+                    className="layers-panel__toggle"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      toggleExpanded(element.id)
+                    }}
+                  >
+                    {collapsedGroupIds.has(element.id) ? '▸' : '▾'}
+                  </button>
+                )}
+                {element.props.name}
+              </li>
+            )
+          })}
         </ul>
       )}
     </div>
