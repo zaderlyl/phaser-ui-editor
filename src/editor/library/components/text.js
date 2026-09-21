@@ -1,6 +1,6 @@
 // Texte: a plain text label. Matches the cahier des charges' "Texte"
-// component: position X/Y, contenu, taille de police, couleur, gras/italique.
-// Kept simple for now — no resize handling (Phaser.GameObjects.Text
+// component: position X/Y, contenu, taille de police, couleur, gras/italique,
+// alignement. Kept simple for now — no resize handling (Phaser.GameObjects.Text
 // auto-sizes from its own content/font, see EditorScene.resizeSelected's
 // setSize guard).
 const defaultProps = {
@@ -11,6 +11,7 @@ const defaultProps = {
   color: 0xffffff,
   bold: false,
   italic: false,
+  align: 'left',
   originX: 0,
   originY: 0,
 }
@@ -33,12 +34,13 @@ function toFontStyle(bold, italic) {
 }
 
 function create(scene, props) {
-  const { x, y, text, fontSize, color, bold, italic, originX, originY } = props
+  const { x, y, text, fontSize, color, bold, italic, align, originX, originY } = props
   return scene.add
     .text(x, y, text, {
       fontSize: `${fontSize}px`,
       color: toCssColor(color),
       fontStyle: toFontStyle(bold, italic),
+      align,
     })
     .setOrigin(originX, originY)
 }
@@ -50,9 +52,9 @@ function escapeText(text) {
 }
 
 function generateCode({ props }) {
-  const { name, x, y, text, fontSize, color, bold, italic, originX, originY } = props
+  const { name, x, y, text, fontSize, color, bold, italic, align, originX, originY } = props
   const fontStyle = toFontStyle(bold, italic)
-  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}' }).setOrigin(${originX}, ${originY});`
+  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}' }).setOrigin(${originX}, ${originY});`
 }
 
 export const textComponent = {

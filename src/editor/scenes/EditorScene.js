@@ -685,6 +685,9 @@ export class EditorScene extends Phaser.Scene {
       const fontStyle = bold && italic ? 'bold italic' : bold ? 'bold' : italic ? 'italic' : 'normal'
       gameObject.setFontStyle(fontStyle)
     }
+    if ('align' in patch && typeof gameObject.setAlign === 'function') {
+      gameObject.setAlign(element.props.align)
+    }
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))

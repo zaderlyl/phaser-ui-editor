@@ -125,6 +125,10 @@ export function PropertiesPanel({
     onChange(id, { [key]: event.target.checked })
   }
 
+  const handleAlignChange = (value) => () => {
+    onChange(id, { align: value })
+  }
+
   return (
     <aside className="properties-panel">
       <h2 className="properties-panel__title">Propriétés</h2>
@@ -189,6 +193,28 @@ export function PropertiesPanel({
               />
               Italique
             </label>
+          </div>
+        </div>
+      )}
+
+      {'align' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Alignement</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'left', label: 'Gauche' },
+              { value: 'center', label: 'Centre' },
+              { value: 'right', label: 'Droite' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleAlignChange(value)}
+                className={props.align === value ? 'properties-panel__row-button--active' : ''}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
       )}
