@@ -8,7 +8,8 @@ import './App.css'
 
 function App() {
   const sceneRef = useRef(null)
-  const [selectedElement, setSelectedElement] = useState(null)
+  // Always an array — 0, 1 or several selected elements (shift-click).
+  const [selectedElements, setSelectedElements] = useState([])
   const [elements, setElements] = useState([])
   const [isExportOpen, setExportOpen] = useState(false)
 
@@ -28,12 +29,27 @@ function App() {
     sceneRef.current?.removeElement(id)
   }, [])
 
+  const handleDeleteSelected = useCallback(() => {
+    sceneRef.current?.removeSelectedElements()
+  }, [])
+
   const handleSelect = useCallback((id) => {
     sceneRef.current?.selectElement(id)
   }, [])
 
   const handleReorder = useCallback((orderedIds) => {
     sceneRef.current?.reorderElements(orderedIds)
+  }, [])
+
+  const handleAlign = useCallback((mode) => {
+    sceneRef.current?.alignSelected(mode)
+  }, [])
+
+  // Live position/size/name updates from a single-element drag, resize or
+  // rename (see EditorScene's 'elementchange') only ever concern the one
+  // element currently selected, so just refresh it in place.
+  const handleElementChange = useCallback((snapshot) => {
+    setSelectedElements(snapshot ? [snapshot] : [])
   }, [])
 
   return (
@@ -49,7 +65,7 @@ function App() {
           <LibraryPanel />
           <LayersPanel
             elements={elements}
-            selectedId={selectedElement?.id}
+            selectedIds={selectedElements.map((element) => element.id)}
             onSelect={handleSelect}
             onReorder={handleReorder}
           />
@@ -57,16 +73,18 @@ function App() {
         <main className="app-main">
           <PhaserCanvas
             onSceneReady={handleSceneReady}
-            onSelectionChange={setSelectedElement}
-            onElementChange={setSelectedElement}
+            onSelectionChange={setSelectedElements}
+            onElementChange={handleElementChange}
             onElementsChange={setElements}
           />
         </main>
         <PropertiesPanel
-          element={selectedElement}
+          elements={selectedElements}
           onChange={handlePropertyChange}
           onRename={handleRename}
           onDelete={handleDelete}
+          onDeleteSelected={handleDeleteSelected}
+          onAlign={handleAlign}
         />
       </div>
 

@@ -18,7 +18,10 @@ export class EditorScene extends Phaser.Scene {
     // The generic list all future features (selection, properties panel,
     // code generation) will read from and write to.
     this.elements = []
-    this.selectedId = null
+    // Selection is a set so several elements can be selected at once
+    // (shift-click). Order doesn't matter here — this.elements' own order
+    // is what drives rendering, layers and iteration.
+    this.selectedIds = new Set()
     // Per-type counters for generating default names (panel1, panel2, ...).
     this.typeCounters = {}
   }
@@ -56,25 +59,32 @@ export class EditorScene extends Phaser.Scene {
       return handle
     })
 
-    // Clicking an element selects it; clicking anything else (background) deselects.
-    // Handles are editor chrome, not selectable/deselectable targets.
-    this.input.on('gameobjectdown', (_pointer, gameObject) => {
+    // Clicking an element selects it (shift adds/removes it from the current
+    // selection instead of replacing it); clicking anything else (background)
+    // clears the selection, unless shift is held — a shift-click on empty
+    // space is a no-op rather than wiping out what's already selected.
+    // Handles are editor chrome, never a selection target themselves.
+    this.input.on('gameobjectdown', (pointer, gameObject) => {
       if (gameObject.getData('isHandle')) return
 
+      const additive = !!pointer.event?.shiftKey
       const elementId = gameObject.getData('elementId')
       if (elementId) {
-        this.selectElement(elementId)
-      } else {
-        this.deselectElement()
+        this.selectElement(elementId, { additive })
+      } else if (!additive) {
+        this.deselectAll()
       }
     })
 
     // A handle drag starts from the corner opposite the one grabbed, so that
     // corner stays fixed in place while the grabbed one follows the pointer.
+    // Resize handles only appear for a single selected element (see
+    // drawSelection), so this.selectedIds always has exactly one id here.
     this.input.on('dragstart', (_pointer, gameObject) => {
       if (!gameObject.getData('isHandle')) return
 
-      const element = this.elements.find((el) => el.id === this.selectedId)
+      const [selectedId] = this.selectedIds
+      const element = this.elements.find((el) => el.id === selectedId)
       if (!element) return
 
       const bounds = element.gameObject.getBounds()
@@ -89,32 +99,48 @@ export class EditorScene extends Phaser.Scene {
         return
       }
 
-      // Dragging moves the element and keeps its stored props (and the
-      // selection frame) in sync with its actual position.
-      gameObject.x = dragX
-      gameObject.y = dragY
+      const elementId = gameObject.getData('elementId')
+      const element = this.elements.find((el) => el.id === elementId)
+      if (!element) return
 
-      const element = this.elements.find((el) => el.gameObject === gameObject)
-      if (element) {
+      const deltaX = dragX - gameObject.x
+      const deltaY = dragY - gameObject.y
+
+      if (this.selectedIds.size > 1 && this.selectedIds.has(elementId)) {
+        // Part of a multi-selection: move every selected element by the same
+        // delta, so the whole group is dragged together.
+        for (const id of this.selectedIds) {
+          const el = this.elements.find((e) => e.id === id)
+          if (!el) continue
+          el.gameObject.x += deltaX
+          el.gameObject.y += deltaY
+          el.props.x = el.gameObject.x
+          el.props.y = el.gameObject.y
+        }
+      } else {
+        // Single element: keeps its stored props (and the properties panel,
+        // via 'elementchange') in sync with its actual position live.
+        gameObject.x = dragX
+        gameObject.y = dragY
         element.props.x = dragX
         element.props.y = dragY
-        this.events.emit('elementchange', this.getElementSnapshot(element.id))
+        this.events.emit('elementchange', this.getElementSnapshot(elementId))
       }
 
       this.drawSelection()
     })
 
-    // Delete/Backspace removes the selected element — but only when the
+    // Delete/Backspace removes every selected element — but only when the
     // keypress didn't originate from a text field (e.g. the properties
     // panel's Nom input), since Phaser's keyboard plugin listens globally
     // regardless of DOM focus.
     const handleDeleteKey = (event) => {
       const target = event.target
       if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
-      if (!this.selectedId) return
+      if (this.selectedIds.size === 0) return
 
       event.preventDefault()
-      this.removeElement(this.selectedId)
+      this.removeSelectedElements()
     }
     this.input.keyboard.on('keydown-DELETE', handleDeleteKey)
     this.input.keyboard.on('keydown-BACKSPACE', handleDeleteKey)
@@ -155,14 +181,22 @@ export class EditorScene extends Phaser.Scene {
     const index = this.elements.findIndex((element) => element.id === id)
     if (index === -1) return
 
-    if (id === this.selectedId) {
-      this.deselectElement()
+    const wasSelected = this.selectedIds.delete(id)
+    if (wasSelected) {
+      this.drawSelection()
+      this.events.emit('selectionchange', this.getSelectionSnapshot())
     }
 
     const [element] = this.elements.splice(index, 1)
     element.gameObject.destroy()
     this.reindexDepths()
     this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  removeSelectedElements() {
+    for (const id of [...this.selectedIds]) {
+      this.removeElement(id)
+    }
   }
 
   // Reorders elements to match the given id order (back to front) and
@@ -183,17 +217,30 @@ export class EditorScene extends Phaser.Scene {
     this.elements.forEach((element, index) => element.gameObject.setDepth(index))
   }
 
-  selectElement(id) {
-    this.selectedId = id
+  // additive (shift-click): toggles the element in/out of the current
+  // selection. Otherwise, replaces the selection with just this element.
+  selectElement(id, { additive = false } = {}) {
+    if (additive) {
+      if (this.selectedIds.has(id)) {
+        this.selectedIds.delete(id)
+      } else {
+        this.selectedIds.add(id)
+      }
+    } else {
+      this.selectedIds = new Set([id])
+    }
+
     this.drawSelection()
-    this.events.emit('selectionchange', this.getElementSnapshot(id))
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
-  deselectElement() {
-    this.selectedId = null
+  deselectAll() {
+    if (this.selectedIds.size === 0) return
+
+    this.selectedIds = new Set()
     this.selectionGraphics.clear()
     this.setHandlesVisible(false)
-    this.events.emit('selectionchange', null)
+    this.events.emit('selectionchange', [])
   }
 
   // Applies a partial props update (e.g. from the properties panel) to an
@@ -246,6 +293,57 @@ export class EditorScene extends Phaser.Scene {
     return { success: true }
   }
 
+  // Aligns every selected element's bounding box against the extremes (or
+  // center) of the overall selection bounding box — the usual Figma-style
+  // align tools. No-op with fewer than 2 selected (nothing to align to).
+  alignSelected(mode) {
+    const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
+    if (elements.length < 2) return
+
+    const boundsList = elements.map((el) => ({ el, bounds: el.gameObject.getBounds() }))
+    const minLeft = Math.min(...boundsList.map(({ bounds }) => bounds.left))
+    const maxRight = Math.max(...boundsList.map(({ bounds }) => bounds.right))
+    const minTop = Math.min(...boundsList.map(({ bounds }) => bounds.top))
+    const maxBottom = Math.max(...boundsList.map(({ bounds }) => bounds.bottom))
+    const centerX = (minLeft + maxRight) / 2
+    const centerY = (minTop + maxBottom) / 2
+
+    for (const { el, bounds } of boundsList) {
+      let deltaX = 0
+      let deltaY = 0
+      switch (mode) {
+        case 'left':
+          deltaX = minLeft - bounds.left
+          break
+        case 'right':
+          deltaX = maxRight - bounds.right
+          break
+        case 'centerH':
+          deltaX = centerX - (bounds.left + bounds.right) / 2
+          break
+        case 'top':
+          deltaY = minTop - bounds.top
+          break
+        case 'bottom':
+          deltaY = maxBottom - bounds.bottom
+          break
+        case 'centerV':
+          deltaY = centerY - (bounds.top + bounds.bottom) / 2
+          break
+        default:
+          return
+      }
+
+      el.gameObject.x += deltaX
+      el.gameObject.y += deltaY
+      el.props.x = el.gameObject.x
+      el.props.y = el.gameObject.y
+    }
+
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
   // Plain-object copy of an element (no GameObject reference), safe to hand
   // to React state without aliasing issues.
   getElementSnapshot(id) {
@@ -264,10 +362,20 @@ export class EditorScene extends Phaser.Scene {
     }))
   }
 
+  // Snapshot of the current selection, in this.elements' (back-to-front)
+  // order — what the properties panel renders (single vs. multi state).
+  getSelectionSnapshot() {
+    return this.elements
+      .filter((element) => this.selectedIds.has(element.id))
+      .map((element) => ({ id: element.id, type: element.type, props: { ...element.props } }))
+  }
+
   // Resizes the selected element so the dragged corner follows the pointer
-  // while the opposite corner (captured on dragstart) stays fixed.
+  // while the opposite corner (captured on dragstart) stays fixed. Only
+  // reachable with a single selected element (see drawSelection).
   resizeSelected(handle, dragX, dragY) {
-    const element = this.elements.find((el) => el.id === this.selectedId)
+    const [selectedId] = this.selectedIds
+    const element = this.elements.find((el) => el.id === selectedId)
     if (!element) return
 
     const fixedX = handle.getData('fixedX')
@@ -296,20 +404,40 @@ export class EditorScene extends Phaser.Scene {
   }
 
   drawSelection() {
-    const element = this.elements.find((el) => el.id === this.selectedId)
     this.selectionGraphics.clear()
 
-    if (!element) {
+    if (this.selectedIds.size === 0) {
       this.setHandlesVisible(false)
       return
     }
 
-    const bounds = element.gameObject.getBounds()
-    this.selectionGraphics.lineStyle(2, SELECTION_COLOR, 1)
-    this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+    if (this.selectedIds.size === 1) {
+      const [selectedId] = this.selectedIds
+      const element = this.elements.find((el) => el.id === selectedId)
+      if (!element) {
+        this.setHandlesVisible(false)
+        return
+      }
 
-    this.positionHandles(bounds)
-    this.setHandlesVisible(true)
+      const bounds = element.gameObject.getBounds()
+      this.selectionGraphics.lineStyle(2, SELECTION_COLOR, 1)
+      this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+      this.positionHandles(bounds)
+      this.setHandlesVisible(true)
+      return
+    }
+
+    // Multiple selected: outline each one individually. Group resize isn't
+    // supported yet, so no handles here — just the click/drag/align/delete
+    // affordances multi-selection already gives.
+    this.setHandlesVisible(false)
+    this.selectionGraphics.lineStyle(2, SELECTION_COLOR, 1)
+    for (const id of this.selectedIds) {
+      const element = this.elements.find((el) => el.id === id)
+      if (!element) continue
+      const bounds = element.gameObject.getBounds()
+      this.selectionGraphics.strokeRect(bounds.x, bounds.y, bounds.width, bounds.height)
+    }
   }
 
   positionHandles(bounds) {

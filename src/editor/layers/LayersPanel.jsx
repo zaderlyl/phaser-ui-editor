@@ -5,7 +5,7 @@ import './LayersPanel.css'
 // a row onto another. EditorScene.elements is the source of truth for
 // order (back to front); dropping onto a row places the dragged element
 // just behind it in that order.
-export function LayersPanel({ elements, selectedId, onSelect, onReorder }) {
+export function LayersPanel({ elements, selectedIds, onSelect, onReorder }) {
   const frontToBack = [...elements].reverse()
 
   const handleDragStart = (id) => (event) => {
@@ -47,7 +47,7 @@ export function LayersPanel({ elements, selectedId, onSelect, onReorder }) {
               onClick={() => onSelect(element.id)}
               className={
                 'layers-panel__item' +
-                (element.id === selectedId ? ' layers-panel__item--selected' : '')
+                (selectedIds.includes(element.id) ? ' layers-panel__item--selected' : '')
               }
             >
               {element.props.name}
