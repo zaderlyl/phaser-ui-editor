@@ -1,11 +1,11 @@
 // Texte: a real text BOX, not just a label — position X/Y, width/height,
-// contenu, taille de police, couleur, gras/italique, alignement, contour.
-// Alignment
-// only means anything once the content can wrap inside a fixed-size area,
-// so this uses Phaser's word-wrap + setFixedSize (a canvas cropped/padded
-// to an exact size, independent of content) rather than Text's default
-// auto-sizing — which is also what makes it draggable through the same
-// resize handles every other sized component already uses (see
+// contenu, taille de police, couleur, gras/italique, alignement horizontal
+// et vertical, contour, padding. Alignment only means anything once the
+// content can wrap inside a fixed-size area, so this uses Phaser's
+// word-wrap + setFixedSize (a canvas cropped/padded to an exact size,
+// independent of content) rather than Text's default auto-sizing — which
+// is also what makes it draggable through the same resize handles every
+// other sized component already uses (see
 // EditorScene.resizeSelected/updateElementProps's setFixedSize branch).
 const defaultProps = {
   x: 0,
@@ -18,6 +18,8 @@ const defaultProps = {
   bold: false,
   italic: false,
   align: 'left',
+  verticalAlign: 'top',
+  padding: 0,
   strokeColor: 0x000000,
   strokeThickness: 0,
   originX: 0,
@@ -39,6 +41,34 @@ function toFontStyle(bold, italic) {
   if (bold) return 'bold'
   if (italic) return 'italic'
   return 'normal'
+}
+
+// Phaser has no built-in "vertical align within a fixed box" — this
+// pushes the text down using its own padding.top instead: how far down
+// depends on how much shorter the actual rendered (wrapped) content is
+// than the box, so it has to be recomputed from the GameObject's *current*
+// line count every time anything that could change wrapping or vertical
+// fit does (text, fontSize, width, height, padding or verticalAlign
+// itself) — see EditorScene.updateElementProps/resizeSelected, the only
+// other callers. go.style.metrics.{ascent,descent} (whose sum is
+// style.metrics.fontSize) plus go.lineSpacing is the actual per-line
+// height Phaser's own word-wrap uses, measured from the real canvas font
+// rendering — verified empirically against a screenshot rather than
+// assumed, since it's not documented as public API.
+function applyTextLayout(gameObject, props) {
+  const { width, height, padding, verticalAlign } = props
+  gameObject.setWordWrapWidth(Math.max(0, width - padding * 2), true)
+
+  const lineHeight = gameObject.style.metrics.fontSize + gameObject.lineSpacing
+  const contentHeight = gameObject.getWrappedText().length * lineHeight
+  const extraTop =
+    verticalAlign === 'middle'
+      ? Math.max(0, (height - contentHeight) / 2)
+      : verticalAlign === 'bottom'
+        ? Math.max(0, height - contentHeight)
+        : 0
+
+  gameObject.setPadding({ left: padding, right: padding, top: padding + extraTop, bottom: padding })
 }
 
 function create(scene, props) {
@@ -70,6 +100,7 @@ function create(scene, props) {
     })
     .setOrigin(originX, originY)
   textObject.setFixedSize(width, height)
+  applyTextLayout(textObject, props)
   return textObject
 }
 
@@ -92,13 +123,42 @@ function generateCode({ props }) {
     bold,
     italic,
     align,
+    verticalAlign,
+    padding,
     strokeColor,
     strokeThickness,
     originX,
     originY,
   } = props
   const fontStyle = toFontStyle(bold, italic)
-  return `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}', stroke: '${toCssColor(strokeColor)}', strokeThickness: ${strokeThickness}, wordWrap: { width: ${Math.round(width)}, useAdvancedWrap: true } }).setOrigin(${originX}, ${originY}).setFixedSize(${Math.round(width)}, ${Math.round(height)});`
+  const wrapWidth = Math.max(0, Math.round(width) - padding * 2)
+  const base = `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}', stroke: '${toCssColor(strokeColor)}', strokeThickness: ${strokeThickness}, wordWrap: { width: ${wrapWidth}, useAdvancedWrap: true } }).setOrigin(${originX}, ${originY}).setFixedSize(${Math.round(width)}, ${Math.round(height)});`
+
+  if (padding === 0 && verticalAlign === 'top') {
+    return base
+  }
+
+  // Centering/bottom-aligning needs the actual rendered line count, which
+  // depends on the font's real canvas metrics — computed at runtime here
+  // the same way the editor computes it live (applyTextLayout above),
+  // rather than baking in a number that could drift from a different
+  // environment's font rendering.
+  const extraTopExpr =
+    verticalAlign === 'middle'
+      ? `Math.max(0, (${Math.round(height)} - contentHeight) / 2)`
+      : verticalAlign === 'bottom'
+        ? `Math.max(0, ${Math.round(height)} - contentHeight)`
+        : '0'
+
+  return [
+    base,
+    '{',
+    `  const lineHeight = this.${name}.style.metrics.fontSize + this.${name}.lineSpacing;`,
+    `  const contentHeight = this.${name}.getWrappedText().length * lineHeight;`,
+    `  const extraTop = ${extraTopExpr};`,
+    `  this.${name}.setPadding({ left: ${padding}, right: ${padding}, top: ${padding} + extraTop, bottom: ${padding} });`,
+    '}',
+  ].join('\n')
 }
 
 export const textComponent = {
@@ -107,4 +167,5 @@ export const textComponent = {
   defaultProps,
   create,
   generateCode,
+  applyTextLayout,
 }

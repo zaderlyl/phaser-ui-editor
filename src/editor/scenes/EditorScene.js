@@ -646,6 +646,19 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', [])
   }
 
+  // Delegates to the component definition's own applyTextLayout (currently
+  // only text.js has one) to recompute word-wrap width and vertical-align
+  // padding from the element's current props — see text.js for the full
+  // why. Returns whether the element actually has one, so callers (the
+  // width/height patch below) know whether to fall back to a plain
+  // gameObject.setSize() instead.
+  applyTextLayout(element) {
+    const definition = componentLibrary.find((component) => component.type === element.type)
+    if (typeof definition?.applyTextLayout !== 'function') return false
+    definition.applyTextLayout(element.gameObject, element.props)
+    return true
+  }
+
   // Applies a partial props update (e.g. from the properties panel) to an
   // element's GameObject, keeping props and rendered state in sync in both
   // directions (canvas -> panel already covered by drag/resize handlers).
@@ -664,8 +677,8 @@ export class EditorScene extends Phaser.Scene {
       // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
       // only touches hit-area bookkeeping, not what's actually drawn.
       if (typeof gameObject.setFixedSize === 'function') {
-        gameObject.setWordWrapWidth(element.props.width, true)
         gameObject.setFixedSize(element.props.width, element.props.height)
+        this.applyTextLayout(element)
       } else {
         gameObject.setSize(element.props.width, element.props.height)
       }
@@ -682,9 +695,11 @@ export class EditorScene extends Phaser.Scene {
     }
     if ('text' in patch && typeof gameObject.setText === 'function') {
       gameObject.setText(element.props.text)
+      this.applyTextLayout(element)
     }
     if ('fontSize' in patch && typeof gameObject.setFontSize === 'function') {
       gameObject.setFontSize(element.props.fontSize)
+      this.applyTextLayout(element)
     }
     if (('bold' in patch || 'italic' in patch) && typeof gameObject.setFontStyle === 'function') {
       // Two separate checkboxes in the properties panel, one combined CSS
@@ -702,6 +717,9 @@ export class EditorScene extends Phaser.Scene {
     ) {
       const { strokeColor, strokeThickness } = element.props
       gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+    }
+    if ('padding' in patch || 'verticalAlign' in patch) {
+      this.applyTextLayout(element)
     }
 
     this.drawSelection()
@@ -912,14 +930,14 @@ export class EditorScene extends Phaser.Scene {
       // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
       // only touches hit-area bookkeeping, not what's actually drawn.
       if ('width' in element.props) {
+        element.props.width = elWidth
+        element.props.height = elHeight
         if (typeof gameObject.setFixedSize === 'function') {
-          gameObject.setWordWrapWidth(elWidth, true)
           gameObject.setFixedSize(elWidth, elHeight)
+          this.applyTextLayout(element)
         } else {
           gameObject.setSize(elWidth, elHeight)
         }
-        element.props.width = elWidth
-        element.props.height = elHeight
       }
       gameObject.x = elLeft + gameObject.originX * elWidth
       gameObject.y = elTop + gameObject.originY * elHeight
