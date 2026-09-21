@@ -182,6 +182,17 @@ export class EditorScene extends Phaser.Scene {
     }
     this.input.keyboard.on('keydown-DELETE', handleDeleteKey)
     this.input.keyboard.on('keydown-BACKSPACE', handleDeleteKey)
+
+    // Cmd+G (Mac) / Ctrl+G (Windows/Linux) groups the current selection.
+    // Browsers default Ctrl/Cmd+G to "find next" — preventDefault stops that.
+    this.input.keyboard.on('keydown-G', (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!(event.ctrlKey || event.metaKey)) return
+
+      event.preventDefault()
+      this.groupSelected()
+    })
   }
 
   // Instantiates a real Phaser GameObject for the given library component type
@@ -207,7 +218,10 @@ export class EditorScene extends Phaser.Scene {
       this.input.setDraggable(gameObject)
     }
 
-    const element = { id, type, props: resolvedProps, gameObject }
+    // parentId: null for a top-level element, or a group's id once grouped
+    // (see groupSelected) — the element stays in this flat list either way,
+    // just excluded from top-level views (layers panel, depth ordering).
+    const element = { id, type, props: resolvedProps, gameObject, parentId: null }
     // New elements go on top, matching most editors' default stacking.
     this.elements.push(element)
     this.reindexDepths()
@@ -216,6 +230,20 @@ export class EditorScene extends Phaser.Scene {
   }
 
   removeElement(id) {
+    if (!this.elements.some((element) => element.id === id)) return
+
+    // Removing a group takes its children down with it — Phaser's own
+    // Container.destroy() already destroys them, this just keeps
+    // this.elements from holding dangling entries for destroyed gameObjects.
+    // Done first so the parent's index below can't be shifted out from
+    // under it by a child removal earlier in the array.
+    const childIds = this.elements
+      .filter((element) => element.parentId === id)
+      .map((element) => element.id)
+    for (const childId of childIds) {
+      this.removeElement(childId)
+    }
+
     const index = this.elements.findIndex((element) => element.id === id)
     if (index === -1) return
 
@@ -237,6 +265,67 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
+  // Bundles the currently selected top-level elements into a real Phaser
+  // Container: a group's own entry in this.elements, whose gameObject is a
+  // Container that the selected elements' gameObjects get reparented into.
+  // Moving/dragging the group then moves everything inside it for free —
+  // Phaser positions container children in local (container-relative)
+  // space automatically, no manual per-child delta propagation needed.
+  // Already-grouped elements aren't eligible for now (nested/mixed-depth
+  // grouping is a later step); fewer than 2 eligible elements is a no-op.
+  groupSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length < 2) return
+
+    const bounds = this.getBoundsUnion(selected)
+
+    const container = this.add.container(bounds.left, bounds.top)
+    // Container.originX/Y are a read-only 0.5 in this Phaser version, but
+    // that doesn't affect positioning here: container.x/y (and its
+    // children's local x/y) map directly to world coordinates with no
+    // origin-based offset — verified empirically, since assuming otherwise
+    // silently shifted every grouped child on first pass (see below).
+    container.setSize(bounds.width, bounds.height)
+    container.setInteractive({ useHandCursor: true })
+    this.input.setDraggable(container)
+
+    this.typeCounters.group = (this.typeCounters.group ?? 0) + 1
+    const groupId = crypto.randomUUID()
+    container.setData('elementId', groupId)
+    container.setData('elementType', 'group')
+
+    // Container.add() does NOT convert a child's existing x/y from world to
+    // local space — it just keeps whatever x/y the child already has and
+    // starts treating it as container-relative. So each child's world x/y
+    // has to be converted to container-local (i.e. offset by the group's
+    // own world position) *before* reparenting, or it visibly jumps.
+    for (const element of selected) {
+      element.gameObject.x -= bounds.left
+      element.gameObject.y -= bounds.top
+      container.add(element.gameObject)
+      element.parentId = groupId
+      element.props.x = element.gameObject.x
+      element.props.y = element.gameObject.y
+    }
+
+    const groupElement = {
+      id: groupId,
+      type: 'group',
+      parentId: null,
+      props: { name: `group${this.typeCounters.group}`, x: bounds.left, y: bounds.top },
+      gameObject: container,
+    }
+    this.elements.push(groupElement)
+    this.reindexDepths()
+
+    this.selectedIds = new Set([groupId])
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
   // Reorders elements to match the given id order (back to front) and
   // reassigns depths accordingly — used by the layers panel's drag-to-reorder.
   reorderElements(orderedIds) {
@@ -251,8 +340,13 @@ export class EditorScene extends Phaser.Scene {
 
   // Depth follows array order (index 0 = backmost), so paint order always
   // matches the elements list — including the layers panel's display order.
+  // Only top-level elements are scene-depth-sorted; a grouped child's paint
+  // order comes from its position in the parent Container's own child list
+  // instead (see groupSelected), which Phaser manages on its own.
   reindexDepths() {
-    this.elements.forEach((element, index) => element.gameObject.setDepth(index))
+    this.elements
+      .filter((element) => !element.parentId)
+      .forEach((element, index) => element.gameObject.setDepth(index))
   }
 
   // Rubber-band select: redraws the marquee rectangle from its drag-start
@@ -419,15 +513,23 @@ export class EditorScene extends Phaser.Scene {
   getElementSnapshot(id) {
     const element = this.elements.find((el) => el.id === id)
     if (!element) return null
-    return { id: element.id, type: element.type, props: { ...element.props } }
+    return {
+      id: element.id,
+      type: element.type,
+      parentId: element.parentId,
+      props: { ...element.props },
+    }
   }
 
   // Plain-object copy of the full elements list, in back-to-front order —
   // what the layers panel renders (reversed, so front is on top visually).
+  // parentId is null for top-level elements, or a group's id — the layers
+  // panel doesn't build a tree from it yet, that's a later step.
   getElementsSnapshot() {
     return this.elements.map((element) => ({
       id: element.id,
       type: element.type,
+      parentId: element.parentId,
       props: { ...element.props },
     }))
   }
@@ -437,7 +539,12 @@ export class EditorScene extends Phaser.Scene {
   getSelectionSnapshot() {
     return this.elements
       .filter((element) => this.selectedIds.has(element.id))
-      .map((element) => ({ id: element.id, type: element.type, props: { ...element.props } }))
+      .map((element) => ({
+        id: element.id,
+        type: element.type,
+        parentId: element.parentId,
+        props: { ...element.props },
+      }))
   }
 
   // Resizes the whole selection so the dragged corner follows the pointer
