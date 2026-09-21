@@ -24,6 +24,12 @@ export class EditorScene extends Phaser.Scene {
     this.selectedIds = new Set()
     // Per-type counters for generating default names (panel1, panel2, ...).
     this.typeCounters = {}
+    // The group id you're currently "inside" (via double-click), or null.
+    // While inside a group, clicking/dragging its direct children affects
+    // them individually; otherwise a child redirects to its whole group.
+    this.enteredGroupId = null
+    this.lastClickedId = null
+    this.lastClickTime = 0
   }
 
   create() {
@@ -69,15 +75,54 @@ export class EditorScene extends Phaser.Scene {
     // clears the selection, unless shift is held — a shift-click on empty
     // space is a no-op rather than wiping out what's already selected.
     // Handles are editor chrome, never a selection target themselves.
+    //
+    // A child of a group works like Figma's frames: clicking it while you
+    // haven't "entered" its group selects (and, per the 'drag' handler,
+    // moves) the whole group instead — double-clicking the same child
+    // within 300ms enters that group, so it and its siblings can be
+    // selected/dragged individually until you click something else.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
       if (gameObject.getData('isHandle')) return
 
       const additive = !!pointer.event?.shiftKey
       const elementId = gameObject.getData('elementId')
-      if (elementId) {
+
+      if (!elementId) {
+        if (!additive) {
+          this.deselectAll()
+          this.enteredGroupId = null
+        }
+        return
+      }
+
+      const element = this.elements.find((el) => el.id === elementId)
+
+      if (element?.parentId && element.parentId === this.enteredGroupId) {
+        // Child of the group we're already inside — select it directly.
         this.selectElement(elementId, { additive })
-      } else if (!additive) {
-        this.deselectAll()
+        return
+      }
+
+      if (!element?.parentId) {
+        // Top-level element (a plain element, or a group itself) — select
+        // directly, and we're no longer "inside" any specific group.
+        this.enteredGroupId = null
+        this.selectElement(elementId, { additive })
+        return
+      }
+
+      // A child of a group we haven't entered yet.
+      const now = performance.now()
+      const isDoubleClick = this.lastClickedId === elementId && now - this.lastClickTime < 300
+      this.lastClickedId = elementId
+      this.lastClickTime = now
+
+      if (isDoubleClick) {
+        this.enteredGroupId = element.parentId
+        this.selectElement(elementId, { additive })
+      } else {
+        this.enteredGroupId = null
+        this.selectElement(element.parentId, { additive })
       }
     })
 
@@ -94,30 +139,53 @@ export class EditorScene extends Phaser.Scene {
         return
       }
 
-      if (!gameObject.getData('isHandle')) return
+      if (gameObject.getData('isHandle')) {
+        const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
+        if (elements.length === 0) return
 
-      const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
-      if (elements.length === 0) return
+        const bounds = this.getBoundsUnion(elements)
+        const corner = gameObject.getData('corner')
+        gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
+        gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
 
-      const bounds = this.getBoundsUnion(elements)
-      const corner = gameObject.getData('corner')
-      gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
-      gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
+        // Snapshot every selected element's bounds relative to the group's
+        // (single element or many — same math either way), so resizeSelected
+        // can scale each one proportionally as the group bounds change.
+        this.resizeStartBounds = bounds
+        this.resizeSnapshot = elements.map((element) => {
+          const elBounds = element.gameObject.getBounds()
+          return {
+            element,
+            relLeft: elBounds.left - bounds.left,
+            relTop: elBounds.top - bounds.top,
+            width: elBounds.width,
+            height: elBounds.height,
+          }
+        })
+        return
+      }
 
-      // Snapshot every selected element's bounds relative to the group's
-      // (single element or many — same math either way), so resizeSelected
-      // can scale each one proportionally as the group bounds change.
-      this.resizeStartBounds = bounds
-      this.resizeSnapshot = elements.map((element) => {
-        const elBounds = element.gameObject.getBounds()
-        return {
-          element,
-          relLeft: elBounds.left - bounds.left,
-          relTop: elBounds.top - bounds.top,
-          width: elBounds.width,
-          height: elBounds.height,
+      // A child of a group we haven't entered: 'gameobjectdown' already
+      // selected the whole group instead of this child, but Phaser's own
+      // drag targets whatever was actually grabbed (the child) — redirect
+      // the upcoming 'drag' ticks to move the group instead. Phaser's
+      // dragX/dragY are computed relative to the child's own position, not
+      // valid for the group, so raw pointer movement is tracked instead.
+      const elementId = gameObject.getData('elementId')
+      const element = this.elements.find((el) => el.id === elementId)
+      if (element?.parentId && element.parentId !== this.enteredGroupId) {
+        const groupElement = this.elements.find((el) => el.id === element.parentId)
+        if (groupElement) {
+          this.groupDragRedirect = {
+            childId: elementId,
+            groupElement,
+            pointerStartX: pointer.x,
+            pointerStartY: pointer.y,
+            groupStartX: groupElement.gameObject.x,
+            groupStartY: groupElement.gameObject.y,
+          }
         }
-      })
+      }
     })
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
@@ -132,6 +200,19 @@ export class EditorScene extends Phaser.Scene {
       }
 
       const elementId = gameObject.getData('elementId')
+
+      if (this.groupDragRedirect?.childId === elementId) {
+        const { groupElement, pointerStartX, pointerStartY, groupStartX, groupStartY } =
+          this.groupDragRedirect
+        groupElement.gameObject.x = groupStartX + (pointer.x - pointerStartX)
+        groupElement.gameObject.y = groupStartY + (pointer.y - pointerStartY)
+        groupElement.props.x = groupElement.gameObject.x
+        groupElement.props.y = groupElement.gameObject.y
+        this.drawSelection()
+        this.events.emit('elementchange', this.getElementSnapshot(groupElement.id))
+        return
+      }
+
       const element = this.elements.find((el) => el.id === elementId)
       if (!element) return
 
@@ -163,6 +244,7 @@ export class EditorScene extends Phaser.Scene {
     })
 
     this.input.on('dragend', (_pointer, gameObject) => {
+      this.groupDragRedirect = null
       if (gameObject !== this.background) return
       this.marqueeGraphics.clear()
       this.marqueeStart = null
