@@ -41,6 +41,10 @@ function App() {
     sceneRef.current?.reorderElements(orderedIds)
   }, [])
 
+  const handleExtractChild = useCallback((childId, orderedIds) => {
+    sceneRef.current?.extractChildToPosition(childId, orderedIds)
+  }, [])
+
   const handleAlign = useCallback((mode) => {
     sceneRef.current?.alignSelected(mode)
   }, [])
@@ -76,6 +80,7 @@ function App() {
             selectedIds={selectedElements.map((element) => element.id)}
             onSelect={handleSelect}
             onReorder={handleReorder}
+            onExtractChild={handleExtractChild}
           />
         </div>
         <main className="app-main">

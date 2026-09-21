@@ -185,6 +185,12 @@ export function PropertiesPanel({
         </button>
       )}
 
+      {single.parentId && (
+        <button type="button" className="properties-panel__group-button" onClick={onUngroup}>
+          Sortir du groupe (⌘⇧G)
+        </button>
+      )}
+
       <button type="button" className="properties-panel__delete" onClick={() => onDelete(id)}>
         Supprimer
       </button>

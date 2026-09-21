@@ -434,47 +434,122 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
-  // Reverses groupSelected(): every selected group's children are pulled
-  // back out of its Container and reparented directly onto the scene, at
-  // their current WORLD position — getBounds() already accounts for the
-  // container's position *and* scale, so a group that was resized (via
-  // setScale(), see resizeSelected) ungroups into correctly-sized children
-  // instead of snapping back to their pre-resize size. The group itself is
-  // removed once it has no children left to hold.
+  // Pulls one child out of its group's Container and back onto the scene
+  // directly, at its current WORLD position — getBounds() already accounts
+  // for the container's position *and* scale, so a child of a group that
+  // was resized (via setScale(), see resizeSelected) comes out at its
+  // correctly-scaled size instead of snapping back to its pre-resize size.
+  // Does not touch this.elements or emit events — callers own that, since
+  // both a full ungroup (many children at once) and extracting a single
+  // child need this same per-child mechanics but differ in bookkeeping.
+  reparentToScene(child, group) {
+    const bounds = child.gameObject.getBounds()
+    group.gameObject.remove(child.gameObject, false)
+    this.add.existing(child.gameObject)
+
+    child.gameObject.setSize(bounds.width, bounds.height)
+    child.gameObject.x = bounds.left + child.gameObject.originX * bounds.width
+    child.gameObject.y = bounds.top + child.gameObject.originY * bounds.height
+    child.parentId = null
+    child.props.width = bounds.width
+    child.props.height = bounds.height
+    child.props.x = child.gameObject.x
+    child.props.y = child.gameObject.y
+  }
+
+  // Removes a now-empty (or emptied-down-to-one-child, see ungroupSelected)
+  // group's own element/Container. Callers already moved its children out.
+  destroyGroup(group) {
+    if (this.enteredGroupId === group.id) this.enteredGroupId = null
+    const index = this.elements.findIndex((element) => element.id === group.id)
+    if (index !== -1) this.elements.splice(index, 1)
+    group.gameObject.destroy()
+  }
+
+  // Cmd/Ctrl+Shift+G. Two cases, both "take the selection out of its
+  // group(s)":
+  //  - a selected element that IS a group: the whole group dissolves, every
+  //    child comes out (the full reverse of groupSelected).
+  //  - a selected element that's a child of a group which *isn't* itself
+  //    selected (e.g. entered via double-click, then single-clicked): just
+  //    that one element is extracted, leaving its siblings grouped — unless
+  //    that leaves the group with fewer than 2 children, in which case a
+  //    "group" of one thing no longer means anything, so the last child
+  //    comes out too and the group goes with it.
   ungroupSelected() {
-    const groups = this.elements.filter(
-      (element) => this.selectedIds.has(element.id) && element.type === 'group',
+    const selected = this.elements.filter((element) => this.selectedIds.has(element.id))
+    const groups = selected.filter((element) => element.type === 'group')
+    const loneChildren = selected.filter(
+      (element) => element.parentId && !this.selectedIds.has(element.parentId),
     )
-    if (groups.length === 0) return
+    if (groups.length === 0 && loneChildren.length === 0) return
 
     const freedIds = []
+    const groupsToRecheck = new Set()
+
     for (const group of groups) {
-      const children = this.elements.filter((element) => element.parentId === group.id)
-
-      for (const child of children) {
-        const bounds = child.gameObject.getBounds()
-        group.gameObject.remove(child.gameObject, false)
-        this.add.existing(child.gameObject)
-
-        child.gameObject.setSize(bounds.width, bounds.height)
-        child.gameObject.x = bounds.left + child.gameObject.originX * bounds.width
-        child.gameObject.y = bounds.top + child.gameObject.originY * bounds.height
-        child.parentId = null
-        child.props.width = bounds.width
-        child.props.height = bounds.height
-        child.props.x = child.gameObject.x
-        child.props.y = child.gameObject.y
+      for (const child of this.elements.filter((element) => element.parentId === group.id)) {
+        this.reparentToScene(child, group)
         freedIds.push(child.id)
       }
+      this.destroyGroup(group)
+    }
 
-      if (this.enteredGroupId === group.id) this.enteredGroupId = null
-      const index = this.elements.findIndex((element) => element.id === group.id)
-      if (index !== -1) this.elements.splice(index, 1)
-      group.gameObject.destroy()
+    for (const child of loneChildren) {
+      const group = this.elements.find((element) => element.id === child.parentId)
+      if (!group) continue
+      this.reparentToScene(child, group)
+      freedIds.push(child.id)
+      groupsToRecheck.add(group.id)
+    }
+
+    for (const groupId of groupsToRecheck) {
+      const group = this.elements.find((element) => element.id === groupId)
+      if (!group) continue
+      const remaining = this.elements.filter((element) => element.parentId === groupId)
+      if (remaining.length > 1) continue
+      for (const last of remaining) {
+        this.reparentToScene(last, group)
+        freedIds.push(last.id)
+      }
+      this.destroyGroup(group)
     }
 
     this.reindexDepths()
     this.selectedIds = new Set(freedIds)
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Layers panel drag-out: a group's child was dropped onto a top-level
+  // row, so it's extracted from its group (same rules as ungroupSelected's
+  // lone-child case — the group dissolves too if that leaves it with fewer
+  // than 2 children) *and* moved to sit at that exact position in paint
+  // order. orderedIds is the full back-to-front id list the panel already
+  // computed for a plain reorder; stale ids (a group dissolved by this same
+  // call) are dropped automatically since they no longer resolve.
+  extractChildToPosition(childId, orderedIds) {
+    const child = this.elements.find((element) => element.id === childId)
+    if (!child?.parentId) return
+    const group = this.elements.find((element) => element.id === child.parentId)
+    if (!group) return
+
+    this.reparentToScene(child, group)
+    const remaining = this.elements.filter((element) => element.parentId === group.id)
+    if (remaining.length <= 1) {
+      for (const last of remaining) this.reparentToScene(last, group)
+      this.destroyGroup(group)
+    }
+
+    const byId = new Map(this.elements.map((element) => [element.id, element]))
+    const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean)
+    if (reordered.length === this.elements.length) {
+      this.elements = reordered
+    }
+
+    this.reindexDepths()
+    this.selectedIds = new Set([childId])
     this.drawSelection()
     this.events.emit('elementsChange', this.getElementsSnapshot())
     this.events.emit('selectionchange', this.getSelectionSnapshot())
