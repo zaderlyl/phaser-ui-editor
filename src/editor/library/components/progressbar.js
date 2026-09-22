@@ -2,11 +2,12 @@
 // size (and growth edge) represents a value between minValue and
 // maxValue (not necessarily 0-100 — a life bar on 0-1000, for instance)
 // — position X/Y, largeur/hauteur, couleur de fond, couleur de
-// remplissage, orientation, sens de remplissage, ancrage. Built as a
-// Phaser.GameObjects.Container (background rectangle + fill rectangle as
+// remplissage (avec dégradé et une couleur de secours si la valeur est
+// basse), orientation, sens de remplissage, contour, ancrage. Built as a
+// Phaser.GameObjects.Container (background rectangle + fill Graphics as
 // children, both in container-local coordinates) exactly like Button's
 // background+label, since a single Shape can't hold two independently
-// colored/sized rectangles.
+// colored/sized children.
 const defaultProps = {
   x: 0,
   y: 0,
@@ -14,6 +15,10 @@ const defaultProps = {
   height: 24,
   backgroundColor: 0x374151,
   fillColor: 0x22c55e,
+  // Same value as fillColor by default, so a fresh bar renders as a flat
+  // color (no visible gradient) until a créa picks a different end color —
+  // opt-in, like every other advanced knob here.
+  fillGradientEnd: 0x22c55e,
   // When the ratio drops to/below lowThreshold percent, the fill switches
   // to fillColorLow instead — the common health/mana-bar "flash red when
   // low" pattern. Opt-in in effect, not in UI: the default threshold (20)
@@ -49,33 +54,54 @@ function fillRatio(value, minValue, maxValue) {
 }
 
 // fillColor, unless the ratio has dropped to/below lowThreshold percent,
-// in which case fillColorLow takes over instead.
+// in which case fillColorLow takes over instead. The gradient (see
+// drawFill) still runs from whichever of these two into fillGradientEnd —
+// keeping a single gradient partner rather than a second one for the low
+// state is a deliberate simplification for now.
 function activeFillColor(ratio, fillColor, fillColorLow, lowThreshold) {
   return ratio * 100 <= lowThreshold ? fillColorLow : fillColor
 }
 
-// The fill's size, position and origin for the current orientation/
-// direction — shared by create() and syncVisual() so both always agree.
-// The fill is always sized from the track's own top-left (0,0) corner in
-// container-local space; orientation picks which axis it grows along,
-// and direction picks which edge it's anchored to (i.e. which edge stays
-// fixed while the other one moves as the value changes) via the
-// rectangle's own origin — a Rectangle's origin genuinely offsets its
-// rendering without changing x/y, unlike a Container's (see create()'s
-// note below). "normal" reads left-to-right for horizontal and
-// bottom-to-top for vertical (the common health/mana-bar convention of
-// filling upward); "reversed" flips each to right-to-left / top-to-bottom.
+// The fill's literal top-left position and size for the current
+// orientation/direction — shared by create() and syncVisual() so both
+// always agree. orientation picks which axis it grows along, and
+// direction picks which edge it's anchored to (i.e. which edge stays
+// fixed while the other one moves as the value changes). "normal" reads
+// left-to-right for horizontal and bottom-to-top for vertical (the common
+// health/mana-bar convention of filling upward); "reversed" flips each to
+// right-to-left / top-to-bottom.
 function fillGeometry(width, height, ratio, orientation, direction) {
   if (orientation === 'vertical') {
     const fillHeight = height * ratio
     return direction === 'reversed'
-      ? { x: 0, y: 0, width, height: fillHeight, originX: 0, originY: 0 }
-      : { x: 0, y: height, width, height: fillHeight, originX: 0, originY: 1 }
+      ? { x: 0, y: 0, width, height: fillHeight }
+      : { x: 0, y: height - fillHeight, width, height: fillHeight }
   }
   const fillWidth = width * ratio
   return direction === 'reversed'
-    ? { x: width, y: 0, width: fillWidth, height, originX: 1, originY: 0 }
-    : { x: 0, y: 0, width: fillWidth, height, originX: 0, originY: 0 }
+    ? { x: width - fillWidth, y: 0, width: fillWidth, height }
+    : { x: 0, y: 0, width: fillWidth, height }
+}
+
+// Draws the fill as a Graphics rect rather than a plain Rectangle, since a
+// two-stop gradient (fillGradientStyle) is WebGL-only and has no Shape/
+// Rectangle equivalent in Phaser — Graphics is the only game object that
+// supports it. Redrawn from scratch on every change (Graphics has no
+// persistent width/height/fillColor to just update in place, unlike a
+// Rectangle). The gradient always runs in the natural reading direction —
+// left-to-right for horizontal, top-to-bottom for vertical — regardless of
+// which edge direction anchors the fill to, since it's purely decorative
+// and tying it to the anchor as well would only add confusing edge cases.
+function drawFill(graphics, geo, colorStart, colorEnd, orientation) {
+  graphics.clear()
+  if (geo.width <= 0 || geo.height <= 0) return
+
+  if (orientation === 'vertical') {
+    graphics.fillGradientStyle(colorStart, colorStart, colorEnd, colorEnd, 1)
+  } else {
+    graphics.fillGradientStyle(colorStart, colorEnd, colorStart, colorEnd, 1)
+  }
+  graphics.fillRect(geo.x, geo.y, geo.width, geo.height)
 }
 
 function create(scene, props) {
@@ -86,6 +112,7 @@ function create(scene, props) {
     height,
     backgroundColor,
     fillColor,
+    fillGradientEnd,
     fillColorLow,
     lowThreshold,
     value,
@@ -103,11 +130,12 @@ function create(scene, props) {
     .rectangle(0, 0, width, height, backgroundColor)
     .setStrokeStyle(strokeThickness, strokeColor)
     .setOrigin(0, 0)
+
+  const fill = scene.add.graphics()
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction)
-  const fill = scene.add
-    .rectangle(geo.x, geo.y, geo.width, geo.height, activeFillColor(ratio, fillColor, fillColorLow, lowThreshold))
-    .setOrigin(geo.originX, geo.originY)
+  const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
+  drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
 
   // A Container has no real origin support (Phaser's Container.originX/Y
   // is a fixed read-only 0.5 that doesn't affect positioning — see
@@ -132,16 +160,17 @@ function create(scene, props) {
 }
 
 // Resyncs the background and fill to the current props — needed after any
-// change to width/height/backgroundColor/fillColor/value/minValue/
-// maxValue/orientation/direction/strokeColor/strokeThickness, since none
-// of those live on the Container itself (see EditorScene's
-// syncCompositeVisual, the only caller).
+// change to width/height/backgroundColor/fillColor/fillGradientEnd/
+// fillColorLow/lowThreshold/value/minValue/maxValue/orientation/direction/
+// strokeColor/strokeThickness, since none of those live on the Container
+// itself (see EditorScene's syncCompositeVisual, the only caller).
 function syncVisual(container, props) {
   const {
     width,
     height,
     backgroundColor,
     fillColor,
+    fillGradientEnd,
     fillColorLow,
     lowThreshold,
     value,
@@ -161,10 +190,8 @@ function syncVisual(container, props) {
 
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction)
-  fill.setPosition(geo.x, geo.y)
-  fill.setSize(geo.width, geo.height)
-  fill.setOrigin(geo.originX, geo.originY)
-  fill.setFillStyle(activeFillColor(ratio, fillColor, fillColorLow, lowThreshold))
+  const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
+  drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
 }
 
 export const progressBarComponent = {

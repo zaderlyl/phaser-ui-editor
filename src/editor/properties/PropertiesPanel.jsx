@@ -150,6 +150,10 @@ export function PropertiesPanel({
     onChange(id, { fillColorLow: hexToColorNumber(event.target.value) })
   }
 
+  const handleFillGradientEndChange = (event) => {
+    onChange(id, { fillGradientEnd: hexToColorNumber(event.target.value) })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -408,6 +412,17 @@ export function PropertiesPanel({
             type="color"
             value={colorNumberToHex(props.fillColor)}
             onChange={handleFillColorChange}
+          />
+        </div>
+      )}
+
+      {'fillGradientEnd' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Dégradé (fin)</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.fillGradientEnd)}
+            onChange={handleFillGradientEndChange}
           />
         </div>
       )}
