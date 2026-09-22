@@ -720,13 +720,17 @@ export class EditorScene extends Phaser.Scene {
   // per-property Phaser calls above (setFillStyle, setStrokeStyle,
   // setText, setSize as a *visual* resize) exist on it directly — this
   // re-derives its children from props instead, via the component's own
-  // syncVisual hook. Returns whether the element actually has one, same
-  // as applyTextLayout, for callers that need to know before falling back
-  // to a plain gameObject.setSize().
+  // syncVisual hook. `this` (the scene) is passed as a third argument for
+  // a syncVisual that needs to create a new child game object on the fly
+  // (see progressbar.js's icon slots) — existing syncVisual
+  // implementations that don't need it simply ignore the extra argument.
+  // Returns whether the element actually has one, same as
+  // applyTextLayout, for callers that need to know before falling back to
+  // a plain gameObject.setSize().
   syncCompositeVisual(element) {
     const definition = componentLibrary.find((component) => component.type === element.type)
     if (typeof definition?.syncVisual !== 'function') return false
-    definition.syncVisual(element.gameObject, element.props)
+    definition.syncVisual(element.gameObject, element.props, this)
     return true
   }
 
@@ -795,6 +799,32 @@ export class EditorScene extends Phaser.Scene {
     element.gameObject.setDisplaySize(element.props.width, element.props.height)
     element.props.textureKey = textureKey
     element.props.imageData = imageData
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  // Same event-delegation pattern as requestImageReplace, for ProgressBar's
+  // "Choisir une icône" buttons — slot is 'Start' or 'End', matching the
+  // iconStartKey/iconEndKey prop names directly (see progressbar.js).
+  requestProgressBarIcon(id, slot) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'progressbar') return
+    this.events.emit('requestprogressbaricon', { id, slot })
+  }
+
+  // Sets (or replaces) one of ProgressBar's two optional icon slots —
+  // syncCompositeVisual (via progressbar.js's syncVisual) does the actual
+  // work of creating/updating the icon's Image child, since it needs the
+  // scene to create one the first time a slot is used.
+  setProgressBarIcon(id, slot, { textureKey, imageData }) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'progressbar') return
+
+    element.props[`icon${slot}Key`] = textureKey
+    element.props[`icon${slot}Data`] = imageData
+    this.syncCompositeVisual(element)
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))

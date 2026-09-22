@@ -71,6 +71,19 @@ const defaultProps = {
   // itself still respects cornerRadius).
   segments: 0,
   segmentGap: 4,
+  // An optional icon just before/after the bar (e.g. a heart next to a
+  // life bar) — empty key means no icon, same as Image's own textureKey/
+  // imageData pair (imageData is kept only for a future export step, same
+  // reason as image.js — the live texture cache is session-local).
+  // Positioned outside the bar's own width/height box (so it's visible
+  // but not part of the container's hit area/selection bounds — a purely
+  // decorative extension, not draggable/resizable on its own).
+  iconStartKey: '',
+  iconStartData: '',
+  iconEndKey: '',
+  iconEndData: '',
+  iconSize: 32,
+  iconGap: 8,
   originX: 0,
   originY: 0,
 }
@@ -183,6 +196,55 @@ function labelText(value, maxValue, ratio, labelFormat) {
 
 function labelColorHex(labelColor) {
   return `#${labelColor.toString(16).padStart(6, '0')}`
+}
+
+// Where a 'Start'/'End' icon sits, centered outside the bar's own box —
+// before the bar (left for horizontal, above for vertical) for 'Start',
+// after it (right / below) for 'End'. Always the bar's literal geometric
+// start/end, independent of direction (which only affects the fill
+// animation, not where these fixed decorations sit).
+function iconPosition(slot, orientation, width, height, iconSize, iconGap) {
+  const offset = iconGap + iconSize / 2
+  if (orientation === 'vertical') {
+    return slot === 'Start' ? { x: width / 2, y: -offset } : { x: width / 2, y: height + offset }
+  }
+  return slot === 'Start' ? { x: -offset, y: height / 2 } : { x: width + offset, y: height / 2 }
+}
+
+// Creates, updates or hides one icon slot's Image child. Needs the scene
+// to create the Image the first time a slot actually gets a texture (see
+// EditorScene's syncCompositeVisual, which passes it through) — an empty
+// key just hides whatever's there rather than destroying it, so picking a
+// new icon later doesn't need to recreate the game object.
+function syncIconSlot(container, scene, slot, props) {
+  const textureKey = props[`icon${slot}Key`]
+  const dataKey = `icon${slot}`
+  let icon = container.getData(dataKey)
+
+  if (!textureKey) {
+    icon?.setVisible(false)
+    return
+  }
+
+  const { width, height, iconSize, orientation } = props
+  const { x, y } = iconPosition(slot, orientation, width, height, iconSize, props.iconGap)
+
+  if (!icon) {
+    icon = scene.add.image(x, y, textureKey)
+    // Sitting outside the bar's own width/height box (see iconPosition),
+    // an icon would otherwise expand Container.getBounds() — which unions
+    // every child that implements getBounds() — beyond the nominal box,
+    // throwing off resizeSelected/updateElementProps' size math (both
+    // compute from that same getBounds()). Phaser already skips a child
+    // from that union when it has no getBounds() at all (that's how
+    // Graphics — background/fill here — stays out of it, see
+    // boundsZone's own comment); doing the same here keeps the icon
+    // purely decorative, the same way.
+    icon.getBounds = undefined
+    container.add(icon)
+    container.setData(dataKey, icon)
+  }
+  icon.setTexture(textureKey).setDisplaySize(iconSize, iconSize).setPosition(x, y).setVisible(true)
 }
 
 // Draws the track as a Graphics rect (rather than a plain Rectangle Shape)
@@ -340,17 +402,23 @@ function create(scene, props) {
   container.setData('background', background)
   container.setData('fill', fill)
   container.setData('label', label)
+
+  syncIconSlot(container, scene, 'Start', props)
+  syncIconSlot(container, scene, 'End', props)
+
   return container
 }
 
-// Resyncs the background, fill and label to the current props — needed
-// after any change to width/height/backgroundColor/fillColor/
+// Resyncs the background, fill, label and icons to the current props —
+// needed after any change to width/height/backgroundColor/fillColor/
 // fillGradientEnd/fillColorLow/lowThreshold/value/minValue/maxValue/
 // orientation/direction/strokeColor/strokeThickness/padding/cornerRadius/
-// segments/segmentGap/showLabel/labelFormat/labelColor/labelFontSize,
-// since none of those live on the Container itself (see EditorScene's
-// syncCompositeVisual, the only caller).
-function syncVisual(container, props) {
+// segments/segmentGap/showLabel/labelFormat/labelColor/labelFontSize/
+// icon*, since none of those live on the Container itself (see
+// EditorScene's syncCompositeVisual, the only caller — also the source of
+// the `scene` argument, needed the first time an icon slot gets a
+// texture).
+function syncVisual(container, props, scene) {
   const {
     width,
     height,
@@ -388,6 +456,9 @@ function syncVisual(container, props) {
     .setColor(labelColorHex(labelColor))
     .setPosition(width / 2, height / 2)
     .setVisible(showLabel)
+
+  syncIconSlot(container, scene, 'Start', props)
+  syncIconSlot(container, scene, 'End', props)
 }
 
 export const progressBarComponent = {

@@ -27,6 +27,7 @@ export function PropertiesPanel({
   onGroup,
   onUngroup,
   onReplaceImage,
+  onSetProgressBarIcon,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -653,6 +654,40 @@ export function PropertiesPanel({
                 min="0"
                 value={props.segmentGap}
                 onChange={handleNumberChange('segmentGap')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'iconStartKey' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Icônes</span>
+          <div className="properties-panel__row">
+            <button type="button" onClick={() => onSetProgressBarIcon(id, 'Start')}>
+              {props.iconStartKey ? "Changer l'icône (début)" : 'Icône (début)'}
+            </button>
+            <button type="button" onClick={() => onSetProgressBarIcon(id, 'End')}>
+              {props.iconEndKey ? "Changer l'icône (fin)" : 'Icône (fin)'}
+            </button>
+          </div>
+          <div className="properties-panel__row">
+            <label>
+              Taille
+              <input
+                type="number"
+                min="1"
+                value={props.iconSize}
+                onChange={handleNumberChange('iconSize')}
+              />
+            </label>
+            <label>
+              Espacement
+              <input
+                type="number"
+                min="0"
+                value={props.iconGap}
+                onChange={handleNumberChange('iconGap')}
               />
             </label>
           </div>

@@ -30,6 +30,11 @@ export function PhaserCanvas({
   // properties panel's "Changer l'image" button) — mutually exclusive
   // with pendingImageDropRef, whichever was set most recently wins.
   const pendingImageReplaceRef = useRef(null)
+  // { id, slot } for a ProgressBar's "Choisir une icône (début/fin)"
+  // button — same mutual-exclusion rule as pendingImageReplaceRef, just a
+  // different eventual scene call (setProgressBarIcon instead of
+  // replaceImage).
+  const pendingProgressBarIconRef = useRef(null)
   // Double-clicking a text element (see EditorScene's 'starttextedit')
   // opens this <textarea> overlay positioned right on top of it — Phaser
   // itself has no text input, so editing happens in real DOM instead, and
@@ -86,6 +91,10 @@ export function PhaserCanvas({
       })
       scene.events.on('requestimagereplace', ({ id }) => {
         pendingImageReplaceRef.current = id
+        fileInputRef.current?.click()
+      })
+      scene.events.on('requestprogressbaricon', ({ id, slot }) => {
+        pendingProgressBarIconRef.current = { id, slot }
         fileInputRef.current?.click()
       })
       onSceneReady?.(scene)
@@ -147,10 +156,12 @@ export function PhaserCanvas({
     const file = event.target.files?.[0]
     const drop = pendingImageDropRef.current
     const replaceId = pendingImageReplaceRef.current
+    const progressBarIcon = pendingProgressBarIconRef.current
     pendingImageDropRef.current = null
     pendingImageReplaceRef.current = null
+    pendingProgressBarIconRef.current = null
     event.target.value = '' // otherwise re-picking the same file wouldn't fire onChange again
-    if (!file || (!drop && !replaceId)) return
+    if (!file || (!drop && !replaceId && !progressBarIcon)) return
 
     const scene = sceneRef.current
     if (!scene) return
@@ -169,6 +180,14 @@ export function PhaserCanvas({
       scene.textures.once(`addtexture-${textureKey}`, () => {
         if (replaceId) {
           scene.replaceImage(replaceId, { textureKey, imageData: dataUrl })
+          return
+        }
+
+        if (progressBarIcon) {
+          scene.setProgressBarIcon(progressBarIcon.id, progressBarIcon.slot, {
+            textureKey,
+            imageData: dataUrl,
+          })
           return
         }
 
