@@ -579,22 +579,71 @@ function syncVisual(container, props, scene) {
   syncIconSlot(container, scene, 'End', props)
 }
 
-// Exports a static snapshot at the current value — not yet a live API a
-// player's own game code could call to update the bar at runtime (e.g.
-// `setValue(75)`), which is the obvious next step but a separate one:
-// this first covers the same "just get it on screen correctly" ground
-// Image's own first export step did. Reuses this module's own
-// fillRatio/activeFillColor/fillGeometry/fillCornerRadius/labelText —
-// safe here since generateCode runs in the *editor's* JS context to
-// compute what to embed, not in the exported game.
+// The fill's runtime position/size as JS expression strings (not numbers —
+// these end up as literal code in the generated file) in terms of a
+// `ratio` variable that only exists inside the generated setValue
+// closure. width/height/padding/orientation/direction are all static
+// (baked in at export time, like everything else here) — only the value
+// passed to setValue at runtime varies — so this is the exact same
+// branching as fillGeometry, just emitting code instead of computing a
+// number directly.
+function fillGeometryExpr(width, height, padding, orientation, direction) {
+  const innerWidth = Math.round(width - padding * 2)
+  const innerHeight = Math.round(height - padding * 2)
+  if (orientation === 'vertical') {
+    return direction === 'reversed'
+      ? { xExpr: `${padding}`, yExpr: `${padding}`, widthExpr: `${innerWidth}`, heightExpr: `${innerHeight} * ratio` }
+      : {
+          xExpr: `${padding}`,
+          yExpr: `${padding} + ${innerHeight} - fillHeight`,
+          widthExpr: `${innerWidth}`,
+          heightExpr: `${innerHeight} * ratio`,
+        }
+  }
+  return direction === 'reversed'
+    ? {
+        xExpr: `${padding} + ${innerWidth} - fillWidth`,
+        yExpr: `${padding}`,
+        widthExpr: `${innerWidth} * ratio`,
+        heightExpr: `${innerHeight}`,
+      }
+    : { xExpr: `${padding}`, yExpr: `${padding}`, widthExpr: `${innerWidth} * ratio`, heightExpr: `${innerHeight}` }
+}
+
+// Same anchored-corners rule as fillCornerRadius, as a literal object
+// expression using the runtime `radius` variable for the two rounded
+// corners (0 for the other two) — orientation/direction pick which two,
+// statically, at export time.
+function radiusObjectExpr(orientation, direction) {
+  if (orientation === 'vertical') {
+    return direction === 'reversed' ? '{ tl: radius, tr: radius, bl: 0, br: 0 }' : '{ tl: 0, tr: 0, bl: radius, br: radius }'
+  }
+  return direction === 'reversed' ? '{ tl: 0, tr: radius, bl: 0, br: radius }' : '{ tl: radius, tr: 0, bl: radius, br: 0 }'
+}
+
+// Exports the bar with a genuine runtime API — `this.<name>.setValue(v)` —
+// rather than a fixed snapshot of whatever value the canvas happened to
+// show at export time, since the entire point of a progress bar is
+// representing something that changes during play (health, a loading
+// percentage, ...); a static picture would make the component pointless
+// to export. setValue is a plain closure attached directly to the
+// Container instance (not a method on the Screen class keyed by name)
+// so multiple bars on one screen each carry their own, with no name
+// collision to worry about, and reads naturally as `myBar.setValue(75)`
+// on the bar itself. Its body mirrors fillGeometry/fillCornerRadius/
+// activeFillColor/labelText exactly, just emitted as code (see
+// fillGeometryExpr/radiusObjectExpr) instead of computed as numbers,
+// since only `value` is meant to vary after export — width/height/
+// orientation/direction/padding/colors are all baked in, same as
+// everything else this component exports.
 //
 // segments, striped and the icon slots aren't supported yet — each needs
 // its own generated-code shape (a segment loop; a tileable stripe texture
 // baked as base64, similar to Image; an async icon load, again similar to
-// Image) that a live snapshot doesn't need. Throwing here (matching the
-// existing "doesn't support code generation yet" error for a type with no
-// generateCode at all) beats silently exporting a bar that looks
-// different from the one on the canvas.
+// Image) a value-driven redraw doesn't need on its own. Throwing here
+// (matching the existing "doesn't support code generation yet" error for
+// a type with no generateCode at all) beats silently exporting a bar that
+// looks different from the one on the canvas.
 function generateCode({ props }) {
   if (props.segments > 1) {
     throw new Error('ProgressBar export does not support segmented mode yet')
@@ -633,17 +682,14 @@ function generateCode({ props }) {
     visible,
   } = props
 
-  const ratio = fillRatio(value, minValue, maxValue)
-  const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
-  const radius = fillCornerRadius(cornerRadius, geo, orientation, direction)
-
   const hexBackground = `0x${backgroundColor.toString(16).padStart(6, '0')}`
   const hexStroke = `0x${strokeColor.toString(16).padStart(6, '0')}`
-  const hexFillStart = `0x${activeColor.toString(16).padStart(6, '0')}`
+  const hexFillColor = `0x${fillColor.toString(16).padStart(6, '0')}`
+  const hexFillColorLow = `0x${fillColorLow.toString(16).padStart(6, '0')}`
   const hexFillEnd = `0x${fillGradientEnd.toString(16).padStart(6, '0')}`
   const w = Math.round(width)
   const h = Math.round(height)
+  const range = maxValue - minValue
 
   const lines = [`this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`]
 
@@ -663,42 +709,58 @@ function generateCode({ props }) {
     )
   }
 
-  const children = [`this.${name}Background`]
-
-  if (geo.width > 0 && geo.height > 0) {
-    lines.push(`this.${name}Fill = scene.add.graphics();`)
-    const gx = Math.round(geo.x)
-    const gy = Math.round(geo.y)
-    const gw = Math.round(geo.width)
-    const gh = Math.round(geo.height)
-    if (radius === 0) {
-      // See drawFill's comment: fillGradientStyle only interpolates
-      // correctly across a plain fillRect, not fillRoundedRect's arc
-      // tessellation — confirmed via a real pixel scan of the rendered
-      // output, not just visual inspection.
-      lines.push(
-        orientation === 'vertical'
-          ? `this.${name}Fill.fillGradientStyle(${hexFillStart}, ${hexFillStart}, ${hexFillEnd}, ${hexFillEnd}, 1);`
-          : `this.${name}Fill.fillGradientStyle(${hexFillStart}, ${hexFillEnd}, ${hexFillStart}, ${hexFillEnd}, 1);`,
-      )
-      lines.push(`this.${name}Fill.fillRect(${gx}, ${gy}, ${gw}, ${gh});`)
-    } else {
-      lines.push(`this.${name}Fill.fillStyle(${hexFillStart}, 1);`)
-      lines.push(`this.${name}Fill.fillRoundedRect(${gx}, ${gy}, ${gw}, ${gh}, ${JSON.stringify(radius)});`)
-    }
-    children.push(`this.${name}Fill`)
-  }
+  lines.push(`this.${name}Fill = scene.add.graphics();`)
+  const children = [`this.${name}Background`, `this.${name}Fill`]
 
   if (showLabel) {
-    const text = labelText(value, maxValue, ratio, labelFormat)
     lines.push(
-      `this.${name}Label = scene.add.text(${w / 2}, ${h / 2}, '${text}', { fontSize: '${labelFontSize}px', color: '${colorToHex(labelColor)}' }).setOrigin(0.5, 0.5);`,
+      `this.${name}Label = scene.add.text(${w / 2}, ${h / 2}, '', { fontSize: '${labelFontSize}px', color: '${colorToHex(labelColor)}' }).setOrigin(0.5, 0.5);`,
     )
     children.push(`this.${name}Label`)
   }
 
   lines.push(`this.${name}.add([${children.join(', ')}]);`)
   lines.push(`this.${name}.setSize(${w}, ${h});`)
+
+  const geoExpr = fillGeometryExpr(width, height, padding, orientation, direction)
+  const setValueBody = [
+    `  const ratio = Math.max(0, Math.min(1, ${range > 0 ? `(value - ${minValue}) / ${range}` : '0'}));`,
+    `  const activeColor = ratio * 100 <= ${lowThreshold} ? ${hexFillColorLow} : ${hexFillColor};`,
+    `  const fillWidth = ${geoExpr.widthExpr};`,
+    `  const fillHeight = ${geoExpr.heightExpr};`,
+    `  this.${name}Fill.clear();`,
+    `  if (fillWidth > 0 && fillHeight > 0) {`,
+  ]
+  if (cornerRadius > 0) {
+    setValueBody.push(
+      `    const radius = Math.min(${cornerRadius}, fillWidth / 2, fillHeight / 2);`,
+      `    this.${name}Fill.fillStyle(activeColor, 1);`,
+      `    this.${name}Fill.fillRoundedRect(${geoExpr.xExpr}, ${geoExpr.yExpr}, fillWidth, fillHeight, ${radiusObjectExpr(orientation, direction)});`,
+    )
+  } else {
+    // See drawFill's comment: fillGradientStyle only interpolates
+    // correctly across a plain fillRect, not fillRoundedRect's arc
+    // tessellation — confirmed via a real pixel scan of the rendered
+    // output, not just visual inspection.
+    setValueBody.push(
+      orientation === 'vertical'
+        ? `    this.${name}Fill.fillGradientStyle(activeColor, activeColor, ${hexFillEnd}, ${hexFillEnd}, 1);`
+        : `    this.${name}Fill.fillGradientStyle(activeColor, ${hexFillEnd}, activeColor, ${hexFillEnd}, 1);`,
+      `    this.${name}Fill.fillRect(${geoExpr.xExpr}, ${geoExpr.yExpr}, fillWidth, fillHeight);`,
+    )
+  }
+  setValueBody.push(`  }`)
+  if (showLabel) {
+    setValueBody.push(
+      labelFormat === 'value'
+        ? `  this.${name}Label.setText(Math.round(value) + '/' + ${maxValue});`
+        : `  this.${name}Label.setText(Math.round(ratio * 100) + '%');`,
+    )
+  }
+  setValueBody.push(`  this.${name}.value = value;`)
+
+  lines.push(`this.${name}.setValue = (value) => {`, ...setValueBody, `};`)
+  lines.push(`this.${name}.setValue(${value});`)
   if (!visible) lines.push(`this.${name}.setVisible(false);`)
 
   return lines.join('\n    ')
