@@ -13,6 +13,8 @@ const defaultProps = {
   height: 50,
   color: 0x3b82f6,
   strokeColor: 0x2563eb,
+  hoverColor: 0x60a5fa,
+  hoverStrokeColor: 0x2563eb,
   strokeThickness: 2,
   text: 'Bouton',
   callback: 'onButtonClick',
@@ -75,9 +77,24 @@ function syncVisual(container, props) {
 }
 
 function generateCode({ props }) {
-  const { name, x, y, width, height, color, strokeColor, strokeThickness, text, callback } = props
+  const {
+    name,
+    x,
+    y,
+    width,
+    height,
+    color,
+    strokeColor,
+    hoverColor,
+    hoverStrokeColor,
+    strokeThickness,
+    text,
+    callback,
+  } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
+  const hexHoverColor = `0x${hoverColor.toString(16).padStart(6, '0')}`
+  const hexHoverStrokeColor = `0x${hoverStrokeColor.toString(16).padStart(6, '0')}`
   const escapedText = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 
   // generateElementCode() (see generateScreenClass.js) wraps whatever this
@@ -88,13 +105,18 @@ function generateCode({ props }) {
   // collects every button's callback name (see getCallbackName below) and
   // adds one stub method per unique name, so the file is ready to run
   // (clicking does nothing until filled in) instead of throwing on an
-  // undefined method the first time someone clicks.
+  // undefined method the first time someone clicks. pointerover/pointerout
+  // swap the background straight to the hover/normal colors — no state is
+  // kept for it (unlike the editor's own live props), since the exported
+  // game is the only place hover ever actually happens.
   return [
     `this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
     `this.${name}Background = scene.add.rectangle(0, 0, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(0, 0);`,
     `this.${name}Label = scene.add.text(${Math.round(width) / 2}, ${Math.round(height) / 2}, '${escapedText}', { fontSize: '${LABEL_FONT_SIZE}px', color: '${LABEL_COLOR}' }).setOrigin(0.5, 0.5);`,
     `this.${name}.add([this.${name}Background, this.${name}Label]);`,
     `this.${name}.setInteractive({ useHandCursor: true });`,
+    `this.${name}.on('pointerover', () => this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}));`,
+    `this.${name}.on('pointerout', () => this.${name}Background.setFillStyle(${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}));`,
     `this.${name}.on('pointerdown', () => this.${callback}());`,
   ].join('\n    ')
 }

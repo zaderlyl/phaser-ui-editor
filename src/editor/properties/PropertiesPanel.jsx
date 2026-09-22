@@ -121,6 +121,14 @@ export function PropertiesPanel({
     onChange(id, { strokeColor: hexToColorNumber(event.target.value) })
   }
 
+  const handleHoverColorChange = (event) => {
+    onChange(id, { hoverColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleHoverStrokeColorChange = (event) => {
+    onChange(id, { hoverStrokeColor: hexToColorNumber(event.target.value) })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -326,6 +334,30 @@ export function PropertiesPanel({
                 type="color"
                 value={colorNumberToHex(props.strokeColor)}
                 onChange={handleStrokeColorChange}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'hoverColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur (survol)</span>
+          <div className="properties-panel__row">
+            <label>
+              Fond
+              <input
+                type="color"
+                value={colorNumberToHex(props.hoverColor)}
+                onChange={handleHoverColorChange}
+              />
+            </label>
+            <label>
+              Contour
+              <input
+                type="color"
+                value={colorNumberToHex(props.hoverStrokeColor)}
+                onChange={handleHoverStrokeColorChange}
               />
             </label>
           </div>
