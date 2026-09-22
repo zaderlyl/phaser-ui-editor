@@ -27,6 +27,7 @@ export function PropertiesPanel({
   onGroup,
   onUngroup,
   onReplaceImage,
+  onSetProgressBarIcon,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -138,6 +139,34 @@ export function PropertiesPanel({
     onChange(id, { pressedStrokeColor: hexToColorNumber(event.target.value) })
   }
 
+  const handleBackgroundColorChange = (event) => {
+    onChange(id, { backgroundColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleFillColorChange = (event) => {
+    onChange(id, { fillColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleFillColorLowChange = (event) => {
+    onChange(id, { fillColorLow: hexToColorNumber(event.target.value) })
+  }
+
+  const handleFillGradientEndChange = (event) => {
+    onChange(id, { fillGradientEnd: hexToColorNumber(event.target.value) })
+  }
+
+  const handleStripeColorChange = (event) => {
+    onChange(id, { stripeColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleLabelColorChange = (event) => {
+    onChange(id, { labelColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleLabelFormatChange = (value) => () => {
+    onChange(id, { labelFormat: value })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -164,6 +193,14 @@ export function PropertiesPanel({
 
   const handleVerticalAlignChange = (value) => () => {
     onChange(id, { verticalAlign: value })
+  }
+
+  const handleOrientationChange = (value) => () => {
+    onChange(id, { orientation: value })
+  }
+
+  const handleDirectionChange = (value) => () => {
+    onChange(id, { direction: value })
   }
 
   return (
@@ -194,6 +231,19 @@ export function PropertiesPanel({
           </label>
         </div>
       </div>
+
+      {'visible' in props && (
+        <div className="properties-panel__group">
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.visible}
+              onChange={handleCheckboxChange('visible')}
+            />
+            Visible
+          </label>
+        </div>
+      )}
 
       {'text' in props && (
         <div className="properties-panel__group">
@@ -333,6 +383,204 @@ export function PropertiesPanel({
         </button>
       )}
 
+      {'minValue' in props && 'maxValue' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Plage</span>
+          <div className="properties-panel__row">
+            <label>
+              Min
+              <input
+                type="number"
+                value={props.minValue}
+                onChange={handleNumberChange('minValue')}
+              />
+            </label>
+            <label>
+              Max
+              <input
+                type="number"
+                value={props.maxValue}
+                onChange={handleNumberChange('maxValue')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'value' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Valeur</span>
+          <input
+            type="number"
+            min={props.minValue ?? 0}
+            max={props.maxValue ?? 100}
+            value={props.value}
+            onChange={handleNumberChange('value')}
+          />
+        </div>
+      )}
+
+      {'backgroundColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur de fond</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.backgroundColor)}
+            onChange={handleBackgroundColorChange}
+          />
+        </div>
+      )}
+
+      {'fillColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur de remplissage</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.fillColor)}
+            onChange={handleFillColorChange}
+          />
+        </div>
+      )}
+
+      {'fillGradientEnd' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Dégradé (fin)</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.fillGradientEnd)}
+            onChange={handleFillGradientEndChange}
+          />
+        </div>
+      )}
+
+      {'fillColorLow' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur si valeur basse</span>
+          <div className="properties-panel__row">
+            <label>
+              Seuil (%)
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={props.lowThreshold}
+                onChange={handleNumberChange('lowThreshold')}
+              />
+            </label>
+            <label>
+              Couleur
+              <input
+                type="color"
+                value={colorNumberToHex(props.fillColorLow)}
+                onChange={handleFillColorLowChange}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'showLabel' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Texte</span>
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.showLabel}
+              onChange={handleCheckboxChange('showLabel')}
+            />
+            Afficher un texte sur la barre
+          </label>
+        </div>
+      )}
+
+      {'labelFormat' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Format du texte</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'percent', label: 'Pourcentage' },
+              { value: 'value', label: 'Valeur' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleLabelFormatChange(value)}
+                className={props.labelFormat === value ? 'properties-panel__row-button--active' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {'labelColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur du texte</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.labelColor)}
+            onChange={handleLabelColorChange}
+          />
+        </div>
+      )}
+
+      {'labelFontSize' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Taille du texte</span>
+          <input
+            type="number"
+            min="1"
+            value={props.labelFontSize}
+            onChange={handleNumberChange('labelFontSize')}
+          />
+        </div>
+      )}
+
+      {'orientation' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Orientation</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'horizontal', label: 'Horizontale' },
+              { value: 'vertical', label: 'Verticale' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleOrientationChange(value)}
+                className={
+                  props.orientation === value ? 'properties-panel__row-button--active' : ''
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {'direction' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Sens de remplissage</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'normal', label: 'Normal' },
+              { value: 'reversed', label: 'Inversé' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleDirectionChange(value)}
+                className={props.direction === value ? 'properties-panel__row-button--active' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       {'width' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Taille</span>
@@ -385,6 +633,111 @@ export function PropertiesPanel({
                 type="color"
                 value={colorNumberToHex(props.strokeColor)}
                 onChange={handleStrokeColorChange}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'cornerRadius' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Coins arrondis</span>
+          <input
+            type="number"
+            min="0"
+            value={Math.round(props.cornerRadius)}
+            onChange={handleNumberChange('cornerRadius')}
+          />
+        </div>
+      )}
+
+      {'segments' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Segments</span>
+          <div className="properties-panel__row">
+            <label>
+              Nombre
+              <input
+                type="number"
+                min="0"
+                value={props.segments}
+                onChange={handleNumberChange('segments')}
+              />
+            </label>
+            <label>
+              Espacement
+              <input
+                type="number"
+                min="0"
+                value={props.segmentGap}
+                onChange={handleNumberChange('segmentGap')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'striped' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Rayures</span>
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.striped}
+              onChange={handleCheckboxChange('striped')}
+            />
+            Motif rayé
+          </label>
+          <div className="properties-panel__row">
+            <label>
+              Couleur
+              <input
+                type="color"
+                value={colorNumberToHex(props.stripeColor)}
+                onChange={handleStripeColorChange}
+              />
+            </label>
+            <label>
+              Largeur
+              <input
+                type="number"
+                min="1"
+                value={props.stripeWidth}
+                onChange={handleNumberChange('stripeWidth')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'iconStartKey' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Icônes</span>
+          <div className="properties-panel__row">
+            <button type="button" onClick={() => onSetProgressBarIcon(id, 'Start')}>
+              {props.iconStartKey ? "Changer l'icône (début)" : 'Icône (début)'}
+            </button>
+            <button type="button" onClick={() => onSetProgressBarIcon(id, 'End')}>
+              {props.iconEndKey ? "Changer l'icône (fin)" : 'Icône (fin)'}
+            </button>
+          </div>
+          <div className="properties-panel__row">
+            <label>
+              Taille
+              <input
+                type="number"
+                min="1"
+                value={props.iconSize}
+                onChange={handleNumberChange('iconSize')}
+              />
+            </label>
+            <label>
+              Espacement
+              <input
+                type="number"
+                min="0"
+                value={props.iconGap}
+                onChange={handleNumberChange('iconGap')}
               />
             </label>
           </div>

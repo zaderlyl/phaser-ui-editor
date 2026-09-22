@@ -61,6 +61,10 @@ function App() {
     sceneRef.current?.requestImageReplace(id)
   }, [])
 
+  const handleSetProgressBarIcon = useCallback((id, slot) => {
+    sceneRef.current?.requestProgressBarIcon(id, slot)
+  }, [])
+
   // Live position/size/name updates from a single-element drag, resize or
   // rename (see EditorScene's 'elementchange') only ever concern the one
   // element currently selected, so just refresh it in place.
@@ -105,6 +109,7 @@ function App() {
           onGroup={handleGroup}
           onUngroup={handleUngroup}
           onReplaceImage={handleReplaceImage}
+          onSetProgressBarIcon={handleSetProgressBarIcon}
         />
       </div>
 
