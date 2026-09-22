@@ -39,6 +39,13 @@ const defaultProps = {
   // pressed callbacks.
   strokeColor: 0x1e293b,
   strokeThickness: 0,
+  // Same prop name Text already uses (its own padding means something
+  // different there — inner text margin, see text.js/applyTextLayout,
+  // which safely no-ops for a ProgressBar since it has no such hook) —
+  // reusing it here gives the properties panel's existing generic
+  // "Padding" field for free. 0 means the fill is flush against the
+  // track's edges, as before this prop existed.
+  padding: 0,
   originX: 0,
   originY: 0,
 }
@@ -63,24 +70,28 @@ function activeFillColor(ratio, fillColor, fillColorLow, lowThreshold) {
 }
 
 // The fill's literal top-left position and size for the current
-// orientation/direction — shared by create() and syncVisual() so both
-// always agree. orientation picks which axis it grows along, and
-// direction picks which edge it's anchored to (i.e. which edge stays
-// fixed while the other one moves as the value changes). "normal" reads
-// left-to-right for horizontal and bottom-to-top for vertical (the common
-// health/mana-bar convention of filling upward); "reversed" flips each to
-// right-to-left / top-to-bottom.
-function fillGeometry(width, height, ratio, orientation, direction) {
+// orientation/direction, inset by padding on every side (an "inset" look
+// — the track's own border, if any, stays at the full width/height) —
+// shared by create() and syncVisual() so both always agree. orientation
+// picks which axis it grows along, and direction picks which edge it's
+// anchored to (i.e. which edge stays fixed while the other one moves as
+// the value changes). "normal" reads left-to-right for horizontal and
+// bottom-to-top for vertical (the common health/mana-bar convention of
+// filling upward); "reversed" flips each to right-to-left / top-to-bottom.
+function fillGeometry(width, height, ratio, orientation, direction, padding) {
+  const innerWidth = Math.max(0, width - padding * 2)
+  const innerHeight = Math.max(0, height - padding * 2)
+
   if (orientation === 'vertical') {
-    const fillHeight = height * ratio
+    const fillHeight = innerHeight * ratio
     return direction === 'reversed'
-      ? { x: 0, y: 0, width, height: fillHeight }
-      : { x: 0, y: height - fillHeight, width, height: fillHeight }
+      ? { x: padding, y: padding, width: innerWidth, height: fillHeight }
+      : { x: padding, y: padding + innerHeight - fillHeight, width: innerWidth, height: fillHeight }
   }
-  const fillWidth = width * ratio
+  const fillWidth = innerWidth * ratio
   return direction === 'reversed'
-    ? { x: width - fillWidth, y: 0, width: fillWidth, height }
-    : { x: 0, y: 0, width: fillWidth, height }
+    ? { x: padding + innerWidth - fillWidth, y: padding, width: fillWidth, height: innerHeight }
+    : { x: padding, y: padding, width: fillWidth, height: innerHeight }
 }
 
 // Draws the fill as a Graphics rect rather than a plain Rectangle, since a
@@ -122,6 +133,7 @@ function create(scene, props) {
     direction,
     strokeColor,
     strokeThickness,
+    padding,
     originX,
     originY,
   } = props
@@ -133,7 +145,7 @@ function create(scene, props) {
 
   const fill = scene.add.graphics()
   const ratio = fillRatio(value, minValue, maxValue)
-  const geo = fillGeometry(width, height, ratio, orientation, direction)
+  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
   drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
 
@@ -162,8 +174,9 @@ function create(scene, props) {
 // Resyncs the background and fill to the current props — needed after any
 // change to width/height/backgroundColor/fillColor/fillGradientEnd/
 // fillColorLow/lowThreshold/value/minValue/maxValue/orientation/direction/
-// strokeColor/strokeThickness, since none of those live on the Container
-// itself (see EditorScene's syncCompositeVisual, the only caller).
+// strokeColor/strokeThickness/padding, since none of those live on the
+// Container itself (see EditorScene's syncCompositeVisual, the only
+// caller).
 function syncVisual(container, props) {
   const {
     width,
@@ -180,6 +193,7 @@ function syncVisual(container, props) {
     direction,
     strokeColor,
     strokeThickness,
+    padding,
   } = props
   const background = container.getData('background')
   const fill = container.getData('fill')
@@ -189,7 +203,7 @@ function syncVisual(container, props) {
   background.setStrokeStyle(strokeThickness, strokeColor)
 
   const ratio = fillRatio(value, minValue, maxValue)
-  const geo = fillGeometry(width, height, ratio, orientation, direction)
+  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
   drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
 }
