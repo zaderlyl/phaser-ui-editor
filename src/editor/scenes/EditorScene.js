@@ -463,13 +463,24 @@ export class EditorScene extends Phaser.Scene {
     this.add.existing(child.gameObject)
 
     child.gameObject.setSize(bounds.width, bounds.height)
-    child.gameObject.x = bounds.left + child.gameObject.originX * bounds.width
-    child.gameObject.y = bounds.top + child.gameObject.originY * bounds.height
+    // A Container (a Button, or a nested group if that's ever allowed)
+    // reports a fixed read-only originX/Y of 0.5 that has no bearing on
+    // its actual position — same caveat noted in resizeSelected's
+    // group/button branches — so it's treated as (0, 0) here instead of
+    // trusting that value.
+    const originX = child.gameObject.type === 'Container' ? 0 : child.gameObject.originX
+    const originY = child.gameObject.type === 'Container' ? 0 : child.gameObject.originY
+    child.gameObject.x = bounds.left + originX * bounds.width
+    child.gameObject.y = bounds.top + originY * bounds.height
     child.parentId = null
     child.props.width = bounds.width
     child.props.height = bounds.height
     child.props.x = child.gameObject.x
     child.props.y = child.gameObject.y
+    // A Button's background/label live on its Container as children, not
+    // covered by the setSize() above (hit-area only) — resync them to the
+    // just-restored world size (a no-op for every other type).
+    this.syncButtonVisual(child)
   }
 
   // Removes a now-empty (or emptied-down-to-one-child, see ungroupSelected)
@@ -664,6 +675,21 @@ export class EditorScene extends Phaser.Scene {
     return true
   }
 
+  // Same idea as applyTextLayout, for Button: its gameObject is a
+  // Container (background rectangle + label text as children, see
+  // button.js), so none of the per-property Phaser calls above
+  // (setFillStyle, setStrokeStyle, setText, setSize as a *visual* resize)
+  // exist on it directly — this re-derives both children from props
+  // instead. Returns whether the element actually has one, same as
+  // applyTextLayout, for callers that need to know before falling back to
+  // a plain gameObject.setSize().
+  syncButtonVisual(element) {
+    const definition = componentLibrary.find((component) => component.type === element.type)
+    if (typeof definition?.syncVisual !== 'function') return false
+    definition.syncVisual(element.gameObject, element.props)
+    return true
+  }
+
   // Double-clicking a text element opens it for inline editing: the actual
   // <textarea> overlay is DOM, not Phaser, so it's PhaserCanvas.jsx that
   // owns it — this just hides the live Text (so it's not rendered twice)
@@ -729,7 +755,9 @@ export class EditorScene extends Phaser.Scene {
     if ('color' in patch) {
       // props.color is always a 0xRRGGBB number (see the color picker in
       // PropertiesPanel), but a Rectangle and a Text take it differently —
-      // a Rectangle's fill vs. Text's CSS-string style color.
+      // a Rectangle's fill vs. Text's CSS-string style color. Neither
+      // exists on a Button's Container, so this no-ops there and
+      // syncButtonVisual (below) handles its background fill instead.
       if (typeof gameObject.setFillStyle === 'function') {
         gameObject.setFillStyle(element.props.color)
       } else if (typeof gameObject.setColor === 'function') {
@@ -754,15 +782,36 @@ export class EditorScene extends Phaser.Scene {
     if ('align' in patch && typeof gameObject.setAlign === 'function') {
       gameObject.setAlign(element.props.align)
     }
-    if (
-      ('strokeColor' in patch || 'strokeThickness' in patch) &&
-      typeof gameObject.setStroke === 'function'
-    ) {
+    if ('strokeColor' in patch || 'strokeThickness' in patch) {
+      // Same 0xRRGGBB-number props power a border on both, but a Rectangle
+      // and a Text take it via different APIs — a Rectangle's
+      // setStrokeStyle(width, numericColor) vs. Text's setStroke(cssColor,
+      // width), argument order and color format both differ. Neither
+      // exists on a Button's Container, so this no-ops there and
+      // syncButtonVisual (below) handles its background's border instead.
       const { strokeColor, strokeThickness } = element.props
-      gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+      if (typeof gameObject.setStrokeStyle === 'function') {
+        gameObject.setStrokeStyle(strokeThickness, strokeColor)
+      } else if (typeof gameObject.setStroke === 'function') {
+        gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+      }
     }
     if ('padding' in patch || 'verticalAlign' in patch) {
       this.applyTextLayout(element)
+    }
+    if (
+      'width' in patch ||
+      'height' in patch ||
+      'color' in patch ||
+      'text' in patch ||
+      'strokeColor' in patch ||
+      'strokeThickness' in patch
+    ) {
+      // Button's Container has no direct API for any of these (see the
+      // no-ops noted above) — resync its background/label children from
+      // props instead. No-ops for every other type (syncButtonVisual
+      // returns false when the component has no syncVisual hook).
+      this.syncButtonVisual(element)
     }
 
     this.drawSelection()
@@ -967,11 +1016,33 @@ export class EditorScene extends Phaser.Scene {
         continue
       }
 
+      if (element.type === 'button') {
+        // Same reason as the group branch above: a Container's origin is
+        // always the fixed read-only 0.5, not a real per-element setting,
+        // so the generic `gameObject.originX` math below would misplace
+        // it — treat elLeft/elTop as the literal top-left directly instead
+        // (Button never keeps an ongoing origin concept past creation, see
+        // button.js's create()). Unlike a group, there's no scale/stretch
+        // here: the background rectangle and label are resized/repositioned
+        // for real via syncButtonVisual, same as a live properties-panel
+        // width/height edit does.
+        gameObject.setSize(elWidth, elHeight)
+        gameObject.x = elLeft
+        gameObject.y = elTop
+        element.props.width = elWidth
+        element.props.height = elHeight
+        element.props.x = gameObject.x
+        element.props.y = gameObject.y
+        this.syncButtonVisual(element)
+        continue
+      }
+
       // Only touch size for element types that actually declare width/height
-      // in their props (a group doesn't — see the `continue` above). A
-      // Rectangle's setSize() IS its visual size, but Text has its own
-      // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
-      // only touches hit-area bookkeeping, not what's actually drawn.
+      // in their props (a group and a button don't reach here — see the
+      // `continue`s above). A Rectangle's setSize() IS its visual size, but
+      // Text has its own fixed-size + word-wrap mechanism (see text.js) —
+      // setSize() on Text only touches hit-area bookkeeping, not what's
+      // actually drawn.
       if ('width' in element.props) {
         element.props.width = elWidth
         element.props.height = elHeight

@@ -121,8 +121,36 @@ export function PropertiesPanel({
     onChange(id, { strokeColor: hexToColorNumber(event.target.value) })
   }
 
+  const handleHoverColorChange = (event) => {
+    onChange(id, { hoverColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleHoverStrokeColorChange = (event) => {
+    onChange(id, { hoverStrokeColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handlePressedColorChange = (event) => {
+    onChange(id, { pressedColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handlePressedStrokeColorChange = (event) => {
+    onChange(id, { pressedStrokeColor: hexToColorNumber(event.target.value) })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
+  }
+
+  const handleCallbackChange = (event) => {
+    onChange(id, { callback: event.target.value })
+  }
+
+  const handleHoverCallbackChange = (event) => {
+    onChange(id, { hoverCallback: event.target.value })
+  }
+
+  const handleHoverOutCallbackChange = (event) => {
+    onChange(id, { hoverOutCallback: event.target.value })
   }
 
   const handleCheckboxChange = (key) => (event) => {
@@ -170,6 +198,37 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Contenu</span>
           <textarea value={props.text} onChange={handleTextChange} rows={3} />
+        </div>
+      )}
+
+      {'callback' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Callback (clic)</span>
+          <input type="text" value={props.callback} onChange={handleCallbackChange} />
+        </div>
+      )}
+
+      {'hoverCallback' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Callback (survol)</span>
+          <input
+            type="text"
+            placeholder="(optionnel)"
+            value={props.hoverCallback}
+            onChange={handleHoverCallbackChange}
+          />
+        </div>
+      )}
+
+      {'hoverOutCallback' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Callback (fin survol)</span>
+          <input
+            type="text"
+            placeholder="(optionnel)"
+            value={props.hoverOutCallback}
+            onChange={handleHoverOutCallbackChange}
+          />
         </div>
       )}
 
@@ -315,6 +374,54 @@ export function PropertiesPanel({
                 type="color"
                 value={colorNumberToHex(props.strokeColor)}
                 onChange={handleStrokeColorChange}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'hoverColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur (survol)</span>
+          <div className="properties-panel__row">
+            <label>
+              Fond
+              <input
+                type="color"
+                value={colorNumberToHex(props.hoverColor)}
+                onChange={handleHoverColorChange}
+              />
+            </label>
+            <label>
+              Contour
+              <input
+                type="color"
+                value={colorNumberToHex(props.hoverStrokeColor)}
+                onChange={handleHoverStrokeColorChange}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'pressedColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur (clic)</span>
+          <div className="properties-panel__row">
+            <label>
+              Fond
+              <input
+                type="color"
+                value={colorNumberToHex(props.pressedColor)}
+                onChange={handlePressedColorChange}
+              />
+            </label>
+            <label>
+              Contour
+              <input
+                type="color"
+                value={colorNumberToHex(props.pressedStrokeColor)}
+                onChange={handlePressedStrokeColorChange}
               />
             </label>
           </div>
