@@ -119,18 +119,27 @@ function generateCode({ props }) {
   // returns with a single leading indent and nothing else, so continuation
   // lines carry their own — matching the flat 4-space indent every entry
   // (top-level or nested in a group) already uses throughout that file.
-  // The click itself just calls this.<callback>() — generateScreenClass
-  // collects every button's callback names (see getCallbackNames below) and
-  // adds one stub method per unique name, so the file is ready to run
-  // (clicking does nothing until filled in) instead of throwing on an
-  // undefined method the first time someone clicks. pointerover/pointerout/
-  // pointerdown/pointerup swap the background straight to the matching
-  // color pair — no state is kept for it (unlike the editor's own live
-  // props), since the exported game is the only place any of this actually
-  // happens. pointerup goes back to the *hover* colors rather than normal,
-  // since releasing the pointer still over the button (the common case)
-  // should leave it looking hovered, not suddenly idle; pointerout already
-  // covers the pointer leaving while held down.
+  // generateScreenClass collects every button's callback names (see
+  // getCallbackNames below) and adds one stub method per unique name, so
+  // the file is ready to run (clicking does nothing until filled in)
+  // instead of throwing on an undefined method the first time someone
+  // clicks. pointerover/pointerout/pointerdown/pointerup swap the
+  // background straight to the matching color pair — no state is kept for
+  // it (unlike the editor's own live props), since the exported game is
+  // the only place any of this actually happens.
+  //
+  // The click itself fires on pointerup, not pointerdown: Phaser only
+  // delivers a GameObject's own 'pointerup' when the release happens while
+  // the pointer is still hit-testing that object (same as 'pointerdown'
+  // and 'pointerover' are), so pressing on the button, dragging off it,
+  // and releasing elsewhere does *not* fire this button's callback — the
+  // standard "drag off to cancel a tap" affordance, which firing on
+  // pointerdown would give up entirely (the callback would already have
+  // run before the user had a chance to back out). pointerup also reverts
+  // to the *hover* colors rather than normal, since releasing while still
+  // over the button should leave it looking hovered, not suddenly idle;
+  // pointerout (pointer leaves while held down, i.e. the cancelled case)
+  // already reverts to normal without ever touching the callback.
   const overExpr = `this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor})`
   const outExpr = `this.${name}Background.setFillStyle(${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor})`
   const pointeroverLine = hoverCallback
@@ -145,11 +154,17 @@ function generateCode({ props }) {
     `this.${name}Background = scene.add.rectangle(0, 0, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(0, 0);`,
     `this.${name}Label = scene.add.text(${Math.round(width) / 2}, ${Math.round(height) / 2}, '${escapedText}', { fontSize: '${LABEL_FONT_SIZE}px', color: '${LABEL_COLOR}' }).setOrigin(0.5, 0.5);`,
     `this.${name}.add([this.${name}Background, this.${name}Label]);`,
+    // A Container has no inherent shape, so setInteractive() needs a size
+    // to derive its (rectangular) hit area from — without this, clicking
+    // the button silently does nothing at all (no error either: Phaser
+    // only surfaces the missing hit area if something explicitly calls
+    // hitTestPointer, confirmed empirically, not on an ordinary click).
+    `this.${name}.setSize(${Math.round(width)}, ${Math.round(height)});`,
     `this.${name}.setInteractive({ useHandCursor: true });`,
     pointeroverLine,
     pointeroutLine,
-    `this.${name}.on('pointerdown', () => { this.${name}Background.setFillStyle(${hexPressedColor}).setStrokeStyle(${strokeThickness}, ${hexPressedStrokeColor}); this.${callback}(); });`,
-    `this.${name}.on('pointerup', () => this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}));`,
+    `this.${name}.on('pointerdown', () => this.${name}Background.setFillStyle(${hexPressedColor}).setStrokeStyle(${strokeThickness}, ${hexPressedStrokeColor}));`,
+    `this.${name}.on('pointerup', () => { this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}); this.${callback}(); });`,
   ].join('\n    ')
 }
 
