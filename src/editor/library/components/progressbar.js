@@ -19,6 +19,14 @@ const defaultProps = {
   maxValue: 100,
   orientation: 'horizontal',
   direction: 'normal',
+  // Same prop names Button already uses for its border, so the
+  // properties panel's generic "Contour" section (gated on
+  // 'strokeThickness' in props, see PropertiesPanel.jsx) picks this up
+  // with no new UI code. 0 thickness means no border by default — most
+  // progress bars don't need one, this is opt-in like Button's hover/
+  // pressed callbacks.
+  strokeColor: 0x1e293b,
+  strokeThickness: 0,
   originX: 0,
   originY: 0,
 }
@@ -70,11 +78,16 @@ function create(scene, props) {
     maxValue,
     orientation,
     direction,
+    strokeColor,
+    strokeThickness,
     originX,
     originY,
   } = props
 
-  const background = scene.add.rectangle(0, 0, width, height, backgroundColor).setOrigin(0, 0)
+  const background = scene.add
+    .rectangle(0, 0, width, height, backgroundColor)
+    .setStrokeStyle(strokeThickness, strokeColor)
+    .setOrigin(0, 0)
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction)
   const fill = scene.add
@@ -105,17 +118,29 @@ function create(scene, props) {
 
 // Resyncs the background and fill to the current props — needed after any
 // change to width/height/backgroundColor/fillColor/value/minValue/
-// maxValue/orientation/direction, since none of those live on the
-// Container itself (see EditorScene's syncCompositeVisual, the only
-// caller).
+// maxValue/orientation/direction/strokeColor/strokeThickness, since none
+// of those live on the Container itself (see EditorScene's
+// syncCompositeVisual, the only caller).
 function syncVisual(container, props) {
-  const { width, height, backgroundColor, fillColor, value, minValue, maxValue, orientation, direction } =
-    props
+  const {
+    width,
+    height,
+    backgroundColor,
+    fillColor,
+    value,
+    minValue,
+    maxValue,
+    orientation,
+    direction,
+    strokeColor,
+    strokeThickness,
+  } = props
   const background = container.getData('background')
   const fill = container.getData('fill')
 
   background.setSize(width, height)
   background.setFillStyle(backgroundColor)
+  background.setStrokeStyle(strokeThickness, strokeColor)
 
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction)
