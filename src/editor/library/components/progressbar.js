@@ -14,6 +14,13 @@ const defaultProps = {
   height: 24,
   backgroundColor: 0x374151,
   fillColor: 0x22c55e,
+  // When the ratio drops to/below lowThreshold percent, the fill switches
+  // to fillColorLow instead — the common health/mana-bar "flash red when
+  // low" pattern. Opt-in in effect, not in UI: the default threshold (20)
+  // only kicks in once a créa actually lowers the value that far, so a
+  // freshly dropped bar (default value 60/100) looks unaffected.
+  fillColorLow: 0xef4444,
+  lowThreshold: 20,
   value: 60,
   minValue: 0,
   maxValue: 100,
@@ -39,6 +46,12 @@ function fillRatio(value, minValue, maxValue) {
   const range = maxValue - minValue
   const ratio = range > 0 ? (value - minValue) / range : 0
   return Math.max(0, Math.min(1, ratio))
+}
+
+// fillColor, unless the ratio has dropped to/below lowThreshold percent,
+// in which case fillColorLow takes over instead.
+function activeFillColor(ratio, fillColor, fillColorLow, lowThreshold) {
+  return ratio * 100 <= lowThreshold ? fillColorLow : fillColor
 }
 
 // The fill's size, position and origin for the current orientation/
@@ -73,6 +86,8 @@ function create(scene, props) {
     height,
     backgroundColor,
     fillColor,
+    fillColorLow,
+    lowThreshold,
     value,
     minValue,
     maxValue,
@@ -91,7 +106,7 @@ function create(scene, props) {
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction)
   const fill = scene.add
-    .rectangle(geo.x, geo.y, geo.width, geo.height, fillColor)
+    .rectangle(geo.x, geo.y, geo.width, geo.height, activeFillColor(ratio, fillColor, fillColorLow, lowThreshold))
     .setOrigin(geo.originX, geo.originY)
 
   // A Container has no real origin support (Phaser's Container.originX/Y
@@ -127,6 +142,8 @@ function syncVisual(container, props) {
     height,
     backgroundColor,
     fillColor,
+    fillColorLow,
+    lowThreshold,
     value,
     minValue,
     maxValue,
@@ -147,7 +164,7 @@ function syncVisual(container, props) {
   fill.setPosition(geo.x, geo.y)
   fill.setSize(geo.width, geo.height)
   fill.setOrigin(geo.originX, geo.originY)
-  fill.setFillStyle(fillColor)
+  fill.setFillStyle(activeFillColor(ratio, fillColor, fillColorLow, lowThreshold))
 }
 
 export const progressBarComponent = {

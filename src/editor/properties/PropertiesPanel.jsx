@@ -138,6 +138,18 @@ export function PropertiesPanel({
     onChange(id, { pressedStrokeColor: hexToColorNumber(event.target.value) })
   }
 
+  const handleBackgroundColorChange = (event) => {
+    onChange(id, { backgroundColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleFillColorChange = (event) => {
+    onChange(id, { fillColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleFillColorLowChange = (event) => {
+    onChange(id, { fillColorLow: hexToColorNumber(event.target.value) })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -375,6 +387,54 @@ export function PropertiesPanel({
             value={props.value}
             onChange={handleNumberChange('value')}
           />
+        </div>
+      )}
+
+      {'backgroundColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur de fond</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.backgroundColor)}
+            onChange={handleBackgroundColorChange}
+          />
+        </div>
+      )}
+
+      {'fillColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur de remplissage</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.fillColor)}
+            onChange={handleFillColorChange}
+          />
+        </div>
+      )}
+
+      {'fillColorLow' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur si valeur basse</span>
+          <div className="properties-panel__row">
+            <label>
+              Seuil (%)
+              <input
+                type="number"
+                min="0"
+                max="100"
+                value={props.lowThreshold}
+                onChange={handleNumberChange('lowThreshold')}
+              />
+            </label>
+            <label>
+              Couleur
+              <input
+                type="color"
+                value={colorNumberToHex(props.fillColorLow)}
+                onChange={handleFillColorLowChange}
+              />
+            </label>
+          </div>
         </div>
       )}
 
