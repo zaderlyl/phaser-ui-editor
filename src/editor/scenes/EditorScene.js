@@ -83,6 +83,31 @@ export class EditorScene extends Phaser.Scene {
       return handle
     })
 
+    // A single draggable handle for cornerRadius (any component that
+    // declares that prop — currently just ProgressBar, see the generic
+    // 'cornerRadius' in props check in drawSelection/updateCornerRadius
+    // below — gets it for free). Unlike the 4 resize handles, this one
+    // only ever applies to a single selected element (a radius is one
+    // scalar, not a per-corner bounding-box concept), and is round rather
+    // than square purely so it reads visually distinct from a resize
+    // handle at a glance.
+    this.radiusHandle = this.add
+      .circle(0, 0, HANDLE_SIZE / 2, 0xffffff)
+      .setStrokeStyle(1, SELECTION_COLOR)
+      .setDepth(10001)
+      .setVisible(false)
+    this.radiusHandle.setData('isRadiusHandle', true)
+    {
+      const hitSize = HANDLE_SIZE + HANDLE_HIT_PADDING * 2
+      this.radiusHandle.setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(-hitSize / 2, -hitSize / 2, hitSize, hitSize),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        useHandCursor: true,
+      })
+    }
+    this.radiusHandle.input.enabled = false
+    this.input.setDraggable(this.radiusHandle)
+
     // Clicking an element selects it (shift adds/removes it from the current
     // selection instead of replacing it); clicking anything else (background)
     // clears the selection, unless shift is held — a shift-click on empty
@@ -99,7 +124,7 @@ export class EditorScene extends Phaser.Scene {
     // opens it for inline editing instead — same 300ms/same-id detection,
     // shared across every branch below rather than only the group-child one.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
-      if (gameObject.getData('isHandle')) return
+      if (gameObject.getData('isHandle') || gameObject.getData('isRadiusHandle')) return
 
       const additive = !!pointer.event?.shiftKey
       const elementId = gameObject.getData('elementId')
@@ -154,6 +179,14 @@ export class EditorScene extends Phaser.Scene {
         this.marqueeStart = { x: pointer.x, y: pointer.y }
         this.marqueeAdditive = !!pointer.event?.shiftKey
         this.marqueeBaseSelection = new Set(this.selectedIds)
+        return
+      }
+
+      if (gameObject.getData('isRadiusHandle')) {
+        const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
+        if (elements.length !== 1) return
+        this.radiusDragElement = elements[0]
+        this.radiusDragBounds = elements[0].gameObject.getBounds()
         return
       }
 
@@ -217,6 +250,11 @@ export class EditorScene extends Phaser.Scene {
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
       if (gameObject === this.background) {
         this.updateMarqueeSelection(pointer.x, pointer.y)
+        return
+      }
+
+      if (gameObject.getData('isRadiusHandle')) {
+        this.updateCornerRadius(pointer)
         return
       }
 
@@ -996,6 +1034,29 @@ export class EditorScene extends Phaser.Scene {
   // Holding shift locks the aspect ratio: both axes scale by the larger of
   // the two raw factors, so the anchored corner still stays put but the
   // shape grows/shrinks uniformly instead of stretching.
+  // Dragging the corner-radius handle (positioned inset from the top-right
+  // corner by the current radius on each axis — see drawSelection — the
+  // same convention design tools like Figma use) sets cornerRadius from
+  // how far the pointer has moved in from that corner, averaged across
+  // both axes so an imprecise diagonal drag still feels natural. Clamped
+  // to half the shorter side: past that point "radius" stops meaning
+  // anything (the shape is already a full stadium/capsule).
+  updateCornerRadius(pointer) {
+    const element = this.radiusDragElement
+    if (!element) return
+
+    const bounds = this.radiusDragBounds
+    const deltaX = bounds.right - pointer.x
+    const deltaY = pointer.y - bounds.top
+    const maxRadius = Math.min(bounds.width, bounds.height) / 2
+    const radius = Math.max(0, Math.min(maxRadius, (deltaX + deltaY) / 2))
+
+    element.props.cornerRadius = radius
+    this.syncCompositeVisual(element)
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(element.id))
+  }
+
   resizeSelected(handle, dragX, dragY, keepAspectRatio = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
@@ -1136,12 +1197,16 @@ export class EditorScene extends Phaser.Scene {
 
     if (this.selectedIds.size === 0) {
       this.setHandlesVisible(false)
+      this.radiusHandle.setVisible(false)
+      this.radiusHandle.input.enabled = false
       return
     }
 
     const selected = this.elements.filter((element) => this.selectedIds.has(element.id))
     if (selected.length === 0) {
       this.setHandlesVisible(false)
+      this.radiusHandle.setVisible(false)
+      this.radiusHandle.input.enabled = false
       return
     }
 
@@ -1165,6 +1230,21 @@ export class EditorScene extends Phaser.Scene {
     )
     this.positionHandles(groupBounds)
     this.setHandlesVisible(true)
+
+    // Only makes sense for a single selected element that actually
+    // declares a cornerRadius prop (generic check, like syncCompositeVisual
+    // — not hardcoded to ProgressBar) — a radius is one scalar, not a
+    // per-corner bounding-box concept multiple elements could share.
+    if (selected.length === 1 && 'cornerRadius' in selected[0].props) {
+      const bounds = groupBounds
+      const radius = selected[0].props.cornerRadius ?? 0
+      this.radiusHandle.setPosition(bounds.right - radius, bounds.top + radius)
+      this.radiusHandle.setVisible(true)
+      this.radiusHandle.input.enabled = true
+    } else {
+      this.radiusHandle.setVisible(false)
+      this.radiusHandle.input.enabled = false
+    }
   }
 
   positionHandles(bounds) {

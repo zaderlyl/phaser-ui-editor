@@ -621,6 +621,18 @@ export function PropertiesPanel({
         </div>
       )}
 
+      {'cornerRadius' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Coins arrondis</span>
+          <input
+            type="number"
+            min="0"
+            value={Math.round(props.cornerRadius)}
+            onChange={handleNumberChange('cornerRadius')}
+          />
+        </div>
+      )}
+
       {'hoverColor' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Couleur (survol)</span>

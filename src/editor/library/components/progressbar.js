@@ -3,11 +3,11 @@
 // maxValue (not necessarily 0-100 — a life bar on 0-1000, for instance)
 // — position X/Y, largeur/hauteur, couleur de fond, couleur de
 // remplissage (avec dégradé et une couleur de secours si la valeur est
-// basse), orientation, sens de remplissage, contour, ancrage. Built as a
-// Phaser.GameObjects.Container (background rectangle + fill Graphics as
-// children, both in container-local coordinates) exactly like Button's
-// background+label, since a single Shape can't hold two independently
-// colored/sized children.
+// basse), orientation, sens de remplissage, contour, coins arrondis,
+// ancrage. Built as a Phaser.GameObjects.Container (background Graphics +
+// fill Graphics as children, both in container-local coordinates) exactly
+// like Button's background+label, since a single Shape can't hold two
+// independently colored/sized children.
 const defaultProps = {
   x: 0,
   y: 0,
@@ -46,6 +46,11 @@ const defaultProps = {
   // "Padding" field for free. 0 means the fill is flush against the
   // track's edges, as before this prop existed.
   padding: 0,
+  // 0 means square corners, as before this prop existed. Also drives
+  // EditorScene's draggable corner-radius handle (see drawSelection/
+  // updateCornerRadius there), gated the same generic way — any future
+  // component that declares this prop gets that handle for free too.
+  cornerRadius: 0,
   // A text overlay centered on the bar (e.g. "60%" or "60/100") — hidden
   // by default (opt-in, like the rest of these knobs), distinct prop
   // names (labelColor/labelFontSize) rather than reusing the generic
@@ -104,6 +109,23 @@ function fillGeometry(width, height, ratio, orientation, direction, padding) {
     : { x: padding, y: padding, width: fillWidth, height: innerHeight }
 }
 
+// Per-corner radius for the fill: only the two corners on its *anchored*
+// edge (the one that stays fixed as the value changes, see fillGeometry)
+// are rounded, matching the track's own rounded corners there — the
+// opposite (growing/cut) edge stays square, since rounding it would show
+// a corner floating in the middle of the bar whenever it isn't at 0% or
+// 100%. Clamped to the fill's own current size so a thin sliver near 0%
+// never gets a radius bigger than itself.
+function fillCornerRadius(cornerRadius, geo, orientation, direction) {
+  if (cornerRadius <= 0) return 0
+  const radius = Math.min(cornerRadius, geo.width / 2, geo.height / 2)
+  const zero = { tl: 0, tr: 0, bl: 0, br: 0 }
+  if (orientation === 'vertical') {
+    return direction === 'reversed' ? { ...zero, tl: radius, tr: radius } : { ...zero, bl: radius, br: radius }
+  }
+  return direction === 'reversed' ? { ...zero, tr: radius, br: radius } : { ...zero, tl: radius, bl: radius }
+}
+
 // "60%" for labelFormat 'percent', "60/100" (the raw value and maxValue,
 // unadjusted for minValue — the common case is minValue 0 anyway) for
 // 'value'.
@@ -117,16 +139,39 @@ function labelColorHex(labelColor) {
   return `#${labelColor.toString(16).padStart(6, '0')}`
 }
 
+// Draws the track as a Graphics rect (rather than a plain Rectangle Shape)
+// so it can share fillRoundedRect/strokeRoundedRect with the fill below —
+// Phaser's Rectangle Shape has no public rounded-corner support.
+function drawBackground(graphics, width, height, backgroundColor, strokeColor, strokeThickness, cornerRadius) {
+  graphics.clear()
+  graphics.fillStyle(backgroundColor, 1)
+  if (cornerRadius > 0) {
+    graphics.fillRoundedRect(0, 0, width, height, cornerRadius)
+  } else {
+    graphics.fillRect(0, 0, width, height)
+  }
+  if (strokeThickness > 0) {
+    graphics.lineStyle(strokeThickness, strokeColor, 1)
+    if (cornerRadius > 0) {
+      graphics.strokeRoundedRect(0, 0, width, height, cornerRadius)
+    } else {
+      graphics.strokeRect(0, 0, width, height)
+    }
+  }
+}
+
 // Draws the fill as a Graphics rect rather than a plain Rectangle, since a
 // two-stop gradient (fillGradientStyle) is WebGL-only and has no Shape/
 // Rectangle equivalent in Phaser — Graphics is the only game object that
-// supports it. Redrawn from scratch on every change (Graphics has no
-// persistent width/height/fillColor to just update in place, unlike a
-// Rectangle). The gradient always runs in the natural reading direction —
-// left-to-right for horizontal, top-to-bottom for vertical — regardless of
-// which edge direction anchors the fill to, since it's purely decorative
-// and tying it to the anchor as well would only add confusing edge cases.
-function drawFill(graphics, geo, colorStart, colorEnd, orientation) {
+// supports it (also lets it share rounded-corner support with the
+// background, see fillCornerRadius). Redrawn from scratch on every change
+// (Graphics has no persistent width/height/fillColor to just update in
+// place, unlike a Rectangle). The gradient always runs in the natural
+// reading direction — left-to-right for horizontal, top-to-bottom for
+// vertical — regardless of which edge direction anchors the fill to,
+// since it's purely decorative and tying it to the anchor as well would
+// only add confusing edge cases.
+function drawFill(graphics, geo, colorStart, colorEnd, orientation, direction, cornerRadius) {
   graphics.clear()
   if (geo.width <= 0 || geo.height <= 0) return
 
@@ -135,7 +180,13 @@ function drawFill(graphics, geo, colorStart, colorEnd, orientation) {
   } else {
     graphics.fillGradientStyle(colorStart, colorEnd, colorStart, colorEnd, 1)
   }
-  graphics.fillRect(geo.x, geo.y, geo.width, geo.height)
+
+  const radius = fillCornerRadius(cornerRadius, geo, orientation, direction)
+  if (radius === 0) {
+    graphics.fillRect(geo.x, geo.y, geo.width, geo.height)
+  } else {
+    graphics.fillRoundedRect(geo.x, geo.y, geo.width, geo.height, radius)
+  }
 }
 
 function create(scene, props) {
@@ -157,6 +208,7 @@ function create(scene, props) {
     strokeColor,
     strokeThickness,
     padding,
+    cornerRadius,
     showLabel,
     labelFormat,
     labelColor,
@@ -165,16 +217,27 @@ function create(scene, props) {
     originY,
   } = props
 
-  const background = scene.add
-    .rectangle(0, 0, width, height, backgroundColor)
-    .setStrokeStyle(strokeThickness, strokeColor)
-    .setOrigin(0, 0)
+  // Phaser's Graphics game object (needed below for rounded corners) has
+  // no getBounds() support at all — no ComputedSize/Origin/GetBounds
+  // mixin, unlike a Rectangle or Text. Container.getBounds() unions
+  // whichever of its children actually implement getBounds(), silently
+  // skipping ones that don't — so without this, the container's bounds
+  // (and everything built on them: the selection outline, resize/radius
+  // handle placement, drag-select, reparenting) would come only from the
+  // label, collapsing to its small text size instead of the whole bar,
+  // whenever the label is hidden even shrinking to nothing. A Zone is
+  // Phaser's dedicated invisible placeholder for exactly this — it draws
+  // nothing but has real width/height/origin/getBounds.
+  const boundsZone = scene.add.zone(0, 0, width, height).setOrigin(0, 0)
+
+  const background = scene.add.graphics()
+  drawBackground(background, width, height, backgroundColor, strokeColor, strokeThickness, cornerRadius)
 
   const fill = scene.add.graphics()
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
+  drawFill(fill, geo, activeColor, fillGradientEnd, orientation, direction, cornerRadius)
 
   const label = scene.add
     .text(width / 2, height / 2, labelText(value, maxValue, ratio, labelFormat), {
@@ -199,8 +262,9 @@ function create(scene, props) {
   props.x = left
   props.y = top
 
-  const container = scene.add.container(left, top, [background, fill, label])
+  const container = scene.add.container(left, top, [boundsZone, background, fill, label])
   container.setSize(width, height)
+  container.setData('boundsZone', boundsZone)
   container.setData('background', background)
   container.setData('fill', fill)
   container.setData('label', label)
@@ -210,10 +274,10 @@ function create(scene, props) {
 // Resyncs the background, fill and label to the current props — needed
 // after any change to width/height/backgroundColor/fillColor/
 // fillGradientEnd/fillColorLow/lowThreshold/value/minValue/maxValue/
-// orientation/direction/strokeColor/strokeThickness/padding/showLabel/
-// labelFormat/labelColor/labelFontSize, since none of those live on the
-// Container itself (see EditorScene's syncCompositeVisual, the only
-// caller).
+// orientation/direction/strokeColor/strokeThickness/padding/cornerRadius/
+// showLabel/labelFormat/labelColor/labelFontSize, since none of those
+// live on the Container itself (see EditorScene's syncCompositeVisual,
+// the only caller).
 function syncVisual(container, props) {
   const {
     width,
@@ -231,23 +295,25 @@ function syncVisual(container, props) {
     strokeColor,
     strokeThickness,
     padding,
+    cornerRadius,
     showLabel,
     labelFormat,
     labelColor,
     labelFontSize,
   } = props
+  const boundsZone = container.getData('boundsZone')
   const background = container.getData('background')
   const fill = container.getData('fill')
   const label = container.getData('label')
 
-  background.setSize(width, height)
-  background.setFillStyle(backgroundColor)
-  background.setStrokeStyle(strokeThickness, strokeColor)
+  boundsZone.setSize(width, height)
+
+  drawBackground(background, width, height, backgroundColor, strokeColor, strokeThickness, cornerRadius)
 
   const ratio = fillRatio(value, minValue, maxValue)
   const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
+  drawFill(fill, geo, activeColor, fillGradientEnd, orientation, direction, cornerRadius)
 
   label
     .setText(labelText(value, maxValue, ratio, labelFormat))
