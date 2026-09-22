@@ -57,6 +57,10 @@ function App() {
     sceneRef.current?.ungroupSelected()
   }, [])
 
+  const handleReplaceImage = useCallback((id) => {
+    sceneRef.current?.requestImageReplace(id)
+  }, [])
+
   // Live position/size/name updates from a single-element drag, resize or
   // rename (see EditorScene's 'elementchange') only ever concern the one
   // element currently selected, so just refresh it in place.
@@ -100,6 +104,7 @@ function App() {
           onAlign={handleAlign}
           onGroup={handleGroup}
           onUngroup={handleUngroup}
+          onReplaceImage={handleReplaceImage}
         />
       </div>
 

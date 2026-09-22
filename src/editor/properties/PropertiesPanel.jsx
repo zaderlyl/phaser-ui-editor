@@ -26,6 +26,7 @@ export function PropertiesPanel({
   onAlign,
   onGroup,
   onUngroup,
+  onReplaceImage,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -320,6 +321,16 @@ export function PropertiesPanel({
             onChange={handleNumberChange('padding')}
           />
         </div>
+      )}
+
+      {'textureKey' in props && (
+        <button
+          type="button"
+          className="properties-panel__group-button"
+          onClick={() => onReplaceImage(id)}
+        >
+          Changer l'image
+        </button>
       )}
 
       {'width' in props && (

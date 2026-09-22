@@ -728,6 +728,39 @@ export class EditorScene extends Phaser.Scene {
     element.gameObject.setVisible(true)
   }
 
+  // The properties panel's "Changer l'image" button lives in a sibling
+  // React component with no direct access to the scene or a file picker —
+  // same situation as starttextedit's <textarea> overlay, so this follows
+  // the same pattern: just emit an event PhaserCanvas.jsx is listening for
+  // to open its (already-existing, from the initial-import flow) hidden
+  // file input, remembering *this* element's id so the eventual file
+  // ends up calling replaceImage() instead of creating a new element.
+  requestImageReplace(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'image') return
+    this.events.emit('requestimagereplace', { id })
+  }
+
+  // Swaps an existing image element's picture without touching its
+  // position or on-canvas size — setTexture() alone would reset the
+  // display size to the new picture's own native dimensions, so
+  // setDisplaySize() is reapplied right after with the size the element
+  // already had (the point of "replace", as opposed to placing a new
+  // image, is keeping the same frame and swapping what's inside it).
+  replaceImage(id, { textureKey, imageData }) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'image') return
+
+    element.gameObject.setTexture(textureKey)
+    element.gameObject.setDisplaySize(element.props.width, element.props.height)
+    element.props.textureKey = textureKey
+    element.props.imageData = imageData
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
   // Applies a partial props update (e.g. from the properties panel) to an
   // element's GameObject, keeping props and rendered state in sync in both
   // directions (canvas -> panel already covered by drag/resize handlers).

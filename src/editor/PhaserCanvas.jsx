@@ -25,6 +25,11 @@ export function PhaserCanvas({
   // drop doesn't call addElement() directly (see handleDrop/
   // handleImageFileChange below).
   const pendingImageDropRef = useRef(null)
+  // The id of an existing image element to replace instead of placing a
+  // new one, set by the 'requestimagereplace' listener below (see the
+  // properties panel's "Changer l'image" button) — mutually exclusive
+  // with pendingImageDropRef, whichever was set most recently wins.
+  const pendingImageReplaceRef = useRef(null)
   // Double-clicking a text element (see EditorScene's 'starttextedit')
   // opens this <textarea> overlay positioned right on top of it — Phaser
   // itself has no text input, so editing happens in real DOM instead, and
@@ -78,6 +83,10 @@ export function PhaserCanvas({
           align: payload.align,
           padding: (payload.padding ?? 0) * scaleX,
         })
+      })
+      scene.events.on('requestimagereplace', ({ id }) => {
+        pendingImageReplaceRef.current = id
+        fileInputRef.current?.click()
       })
       onSceneReady?.(scene)
     })
@@ -137,9 +146,11 @@ export function PhaserCanvas({
   const handleImageFileChange = (event) => {
     const file = event.target.files?.[0]
     const drop = pendingImageDropRef.current
+    const replaceId = pendingImageReplaceRef.current
     pendingImageDropRef.current = null
+    pendingImageReplaceRef.current = null
     event.target.value = '' // otherwise re-picking the same file wouldn't fire onChange again
-    if (!file || !drop) return
+    if (!file || (!drop && !replaceId)) return
 
     const scene = sceneRef.current
     if (!scene) return
@@ -152,9 +163,15 @@ export function PhaserCanvas({
       const textureKey = `image-${crypto.randomUUID()}`
 
       // addBase64 decodes the image asynchronously (it's a real
-      // HTMLImageElement load under the hood) — the texture, and its
-      // now-known natural size, aren't available until this fires.
+      // HTMLImageElement load under the hood) — the texture isn't
+      // available (and for a new placement, its natural size isn't
+      // known) until this fires.
       scene.textures.once(`addtexture-${textureKey}`, () => {
+        if (replaceId) {
+          scene.replaceImage(replaceId, { textureKey, imageData: dataUrl })
+          return
+        }
+
         const source = scene.textures.get(textureKey).getSourceImage()
         const scale = Math.min(1, MAX_INITIAL_IMAGE_DIMENSION / Math.max(source.width, source.height))
         const width = Math.round(source.width * scale)
