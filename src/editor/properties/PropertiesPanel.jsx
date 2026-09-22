@@ -333,13 +333,37 @@ export function PropertiesPanel({
         </button>
       )}
 
+      {'minValue' in props && 'maxValue' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Plage</span>
+          <div className="properties-panel__row">
+            <label>
+              Min
+              <input
+                type="number"
+                value={props.minValue}
+                onChange={handleNumberChange('minValue')}
+              />
+            </label>
+            <label>
+              Max
+              <input
+                type="number"
+                value={props.maxValue}
+                onChange={handleNumberChange('maxValue')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
       {'value' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Valeur</span>
           <input
             type="number"
-            min="0"
-            max="100"
+            min={props.minValue ?? 0}
+            max={props.maxValue ?? 100}
             value={props.value}
             onChange={handleNumberChange('value')}
           />
