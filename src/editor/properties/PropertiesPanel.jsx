@@ -166,6 +166,14 @@ export function PropertiesPanel({
     onChange(id, { verticalAlign: value })
   }
 
+  const handleOrientationChange = (value) => () => {
+    onChange(id, { orientation: value })
+  }
+
+  const handleDirectionChange = (value) => () => {
+    onChange(id, { direction: value })
+  }
+
   return (
     <aside className="properties-panel">
       <h2 className="properties-panel__title">Propriétés</h2>
@@ -367,6 +375,50 @@ export function PropertiesPanel({
             value={props.value}
             onChange={handleNumberChange('value')}
           />
+        </div>
+      )}
+
+      {'orientation' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Orientation</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'horizontal', label: 'Horizontale' },
+              { value: 'vertical', label: 'Verticale' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleOrientationChange(value)}
+                className={
+                  props.orientation === value ? 'properties-panel__row-button--active' : ''
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {'direction' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Sens de remplissage</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'normal', label: 'Normal' },
+              { value: 'reversed', label: 'Inversé' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleDirectionChange(value)}
+                className={props.direction === value ? 'properties-panel__row-button--active' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

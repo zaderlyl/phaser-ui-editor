@@ -782,8 +782,20 @@ export class EditorScene extends Phaser.Scene {
       // only touches hit-area bookkeeping, not what's actually drawn. An
       // Image has no setSize() at all (its size is computed from the
       // texture) — setDisplaySize() is the equivalent that actually
-      // stretches the rendered image.
-      if (typeof gameObject.setFixedSize === 'function') {
+      // stretches the rendered image. A composite Container (Button,
+      // ProgressBar, ...) is checked first and separately: it also
+      // inherits setDisplaySize (from the same ComputedSize mixin Image
+      // uses), but taking that branch would scale the whole container
+      // instead of literally resizing it — silently compounding with
+      // syncCompositeVisual's own correct child resize below into a
+      // double-stretch (caught by comparing a Container's actual render
+      // bounds against its width/height props after a properties-panel
+      // resize, not by eye — same technique that already caught the
+      // Button hit-area and Image `this.textures` bugs earlier). Same
+      // ordering resizeSelected already uses for its own Container check.
+      if (gameObject.type === 'Container') {
+        gameObject.setSize(element.props.width, element.props.height)
+      } else if (typeof gameObject.setFixedSize === 'function') {
         gameObject.setFixedSize(element.props.width, element.props.height)
         this.applyTextLayout(element)
       } else if (typeof gameObject.setDisplaySize === 'function') {
