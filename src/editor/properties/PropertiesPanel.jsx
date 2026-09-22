@@ -117,6 +117,26 @@ export function PropertiesPanel({
     onChange(id, { color: hexToColorNumber(event.target.value) })
   }
 
+  const handleStrokeColorChange = (event) => {
+    onChange(id, { strokeColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleTextChange = (event) => {
+    onChange(id, { text: event.target.value })
+  }
+
+  const handleCheckboxChange = (key) => (event) => {
+    onChange(id, { [key]: event.target.checked })
+  }
+
+  const handleAlignChange = (value) => () => {
+    onChange(id, { align: value })
+  }
+
+  const handleVerticalAlignChange = (value) => () => {
+    onChange(id, { verticalAlign: value })
+  }
+
   return (
     <aside className="properties-panel">
       <h2 className="properties-panel__title">Propriétés</h2>
@@ -145,6 +165,103 @@ export function PropertiesPanel({
           </label>
         </div>
       </div>
+
+      {'text' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Contenu</span>
+          <textarea value={props.text} onChange={handleTextChange} rows={3} />
+        </div>
+      )}
+
+      {'fontSize' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Taille de police</span>
+          <input
+            type="number"
+            min="1"
+            value={props.fontSize}
+            onChange={handleNumberChange('fontSize')}
+          />
+        </div>
+      )}
+
+      {'bold' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Style</span>
+          <div className="properties-panel__row">
+            <label className="properties-panel__checkbox">
+              <input type="checkbox" checked={props.bold} onChange={handleCheckboxChange('bold')} />
+              Gras
+            </label>
+            <label className="properties-panel__checkbox">
+              <input
+                type="checkbox"
+                checked={props.italic}
+                onChange={handleCheckboxChange('italic')}
+              />
+              Italique
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'align' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Alignement</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'left', label: 'Gauche' },
+              { value: 'center', label: 'Centre' },
+              { value: 'right', label: 'Droite' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleAlignChange(value)}
+                className={props.align === value ? 'properties-panel__row-button--active' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {'verticalAlign' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Alignement vertical</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'top', label: 'Haut' },
+              { value: 'middle', label: 'Centre' },
+              { value: 'bottom', label: 'Bas' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleVerticalAlignChange(value)}
+                className={
+                  props.verticalAlign === value ? 'properties-panel__row-button--active' : ''
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {'padding' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Padding</span>
+          <input
+            type="number"
+            min="0"
+            value={props.padding}
+            onChange={handleNumberChange('padding')}
+          />
+        </div>
+      )}
 
       {'width' in props && (
         <div className="properties-panel__group">
@@ -176,6 +293,31 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Couleur</span>
           <input type="color" value={colorNumberToHex(props.color)} onChange={handleColorChange} />
+        </div>
+      )}
+
+      {'strokeThickness' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Contour</span>
+          <div className="properties-panel__row">
+            <label>
+              Épaisseur
+              <input
+                type="number"
+                min="0"
+                value={props.strokeThickness}
+                onChange={handleNumberChange('strokeThickness')}
+              />
+            </label>
+            <label>
+              Couleur
+              <input
+                type="color"
+                value={colorNumberToHex(props.strokeColor)}
+                onChange={handleStrokeColorChange}
+              />
+            </label>
+          </div>
         </div>
       )}
 

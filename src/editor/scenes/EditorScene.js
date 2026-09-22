@@ -94,6 +94,10 @@ export class EditorScene extends Phaser.Scene {
     // moves) the whole group instead — double-clicking the same child
     // within 300ms enters that group, so it and its siblings can be
     // selected/dragged individually until you click something else.
+    //
+    // Double-clicking a text element (top-level, or a child once entered)
+    // opens it for inline editing instead — same 300ms/same-id detection,
+    // shared across every branch below rather than only the group-child one.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
       if (gameObject.getData('isHandle')) return
 
@@ -109,10 +113,15 @@ export class EditorScene extends Phaser.Scene {
       }
 
       const element = this.elements.find((el) => el.id === elementId)
+      const now = performance.now()
+      const isDoubleClick = this.lastClickedId === elementId && now - this.lastClickTime < 300
+      this.lastClickedId = elementId
+      this.lastClickTime = now
 
       if (element?.parentId && element.parentId === this.enteredGroupId) {
         // Child of the group we're already inside — select it directly.
         this.selectElement(elementId, { additive })
+        if (isDoubleClick && element.type === 'text') this.startEditingText(elementId)
         return
       }
 
@@ -121,15 +130,11 @@ export class EditorScene extends Phaser.Scene {
         // directly, and we're no longer "inside" any specific group.
         this.enteredGroupId = null
         this.selectElement(elementId, { additive })
+        if (isDoubleClick && element.type === 'text') this.startEditingText(elementId)
         return
       }
 
       // A child of a group we haven't entered yet.
-      const now = performance.now()
-      const isDoubleClick = this.lastClickedId === elementId && now - this.lastClickTime < 300
-      this.lastClickedId = elementId
-      this.lastClickTime = now
-
       if (isDoubleClick) {
         this.enteredGroupId = element.parentId
         this.selectElement(elementId, { additive })
@@ -646,6 +651,57 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', [])
   }
 
+  // Delegates to the component definition's own applyTextLayout (currently
+  // only text.js has one) to recompute word-wrap width and vertical-align
+  // padding from the element's current props — see text.js for the full
+  // why. Returns whether the element actually has one, so callers (the
+  // width/height patch below) know whether to fall back to a plain
+  // gameObject.setSize() instead.
+  applyTextLayout(element) {
+    const definition = componentLibrary.find((component) => component.type === element.type)
+    if (typeof definition?.applyTextLayout !== 'function') return false
+    definition.applyTextLayout(element.gameObject, element.props)
+    return true
+  }
+
+  // Double-clicking a text element opens it for inline editing: the actual
+  // <textarea> overlay is DOM, not Phaser, so it's PhaserCanvas.jsx that
+  // owns it — this just hides the live Text (so it's not rendered twice)
+  // and hands up everything needed to position and style a matching
+  // overlay (world bounds, current content, font size, color, alignment).
+  startEditingText(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'text') return
+
+    element.gameObject.setVisible(false)
+    const bounds = element.gameObject.getBounds()
+    this.events.emit('starttextedit', {
+      id,
+      text: element.props.text,
+      bounds: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height },
+      fontSize: element.props.fontSize,
+      color: element.props.color,
+      align: element.props.align,
+      padding: element.props.padding,
+    })
+  }
+
+  // Commits the overlay's edited text (Enter/blur in PhaserCanvas.jsx) and
+  // makes the live Text visible again.
+  commitTextEdit(id, text) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return
+    element.gameObject.setVisible(true)
+    this.updateElementProps(id, { text })
+  }
+
+  // Discards the overlay (Escape) without touching the element's content.
+  cancelTextEdit(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element) return
+    element.gameObject.setVisible(true)
+  }
+
   // Applies a partial props update (e.g. from the properties panel) to an
   // element's GameObject, keeping props and rendered state in sync in both
   // directions (canvas -> panel already covered by drag/resize handlers).
@@ -660,14 +716,64 @@ export class EditorScene extends Phaser.Scene {
       gameObject.setPosition(element.props.x, element.props.y)
     }
     if ('width' in patch || 'height' in patch) {
-      gameObject.setSize(element.props.width, element.props.height)
+      // A Rectangle's setSize() IS its visual size, but Text has its own
+      // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
+      // only touches hit-area bookkeeping, not what's actually drawn.
+      if (typeof gameObject.setFixedSize === 'function') {
+        gameObject.setFixedSize(element.props.width, element.props.height)
+        this.applyTextLayout(element)
+      } else {
+        gameObject.setSize(element.props.width, element.props.height)
+      }
     }
-    if ('color' in patch && typeof gameObject.setFillStyle === 'function') {
-      gameObject.setFillStyle(element.props.color)
+    if ('color' in patch) {
+      // props.color is always a 0xRRGGBB number (see the color picker in
+      // PropertiesPanel), but a Rectangle and a Text take it differently —
+      // a Rectangle's fill vs. Text's CSS-string style color.
+      if (typeof gameObject.setFillStyle === 'function') {
+        gameObject.setFillStyle(element.props.color)
+      } else if (typeof gameObject.setColor === 'function') {
+        gameObject.setColor(`#${element.props.color.toString(16).padStart(6, '0')}`)
+      }
+    }
+    if ('text' in patch && typeof gameObject.setText === 'function') {
+      gameObject.setText(element.props.text)
+      this.applyTextLayout(element)
+    }
+    if ('fontSize' in patch && typeof gameObject.setFontSize === 'function') {
+      gameObject.setFontSize(element.props.fontSize)
+      this.applyTextLayout(element)
+    }
+    if (('bold' in patch || 'italic' in patch) && typeof gameObject.setFontStyle === 'function') {
+      // Two separate checkboxes in the properties panel, one combined CSS
+      // font-style string for Phaser's Text (see text.js's toFontStyle).
+      const { bold, italic } = element.props
+      const fontStyle = bold && italic ? 'bold italic' : bold ? 'bold' : italic ? 'italic' : 'normal'
+      gameObject.setFontStyle(fontStyle)
+    }
+    if ('align' in patch && typeof gameObject.setAlign === 'function') {
+      gameObject.setAlign(element.props.align)
+    }
+    if (
+      ('strokeColor' in patch || 'strokeThickness' in patch) &&
+      typeof gameObject.setStroke === 'function'
+    ) {
+      const { strokeColor, strokeThickness } = element.props
+      gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+    }
+    if ('padding' in patch || 'verticalAlign' in patch) {
+      this.applyTextLayout(element)
     }
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
+    // A properties-panel edit happens once per discrete input (a keystroke,
+    // a checkbox toggle) rather than per animation-frame tick like a drag,
+    // so unlike resizeSelected there's no perf reason to skip this — and
+    // without it the layers panel and code export kept reading whatever
+    // this element's props were before the edit (see dragend's identical
+    // fix for the same staleness on drag/resize).
+    this.events.emit('elementsChange', this.getElementsSnapshot())
   }
 
   // Renames an element after validating it as a JS identifier (it becomes
@@ -861,12 +967,23 @@ export class EditorScene extends Phaser.Scene {
         continue
       }
 
-      gameObject.setSize(elWidth, elHeight)
+      // Only touch size for element types that actually declare width/height
+      // in their props (a group doesn't — see the `continue` above). A
+      // Rectangle's setSize() IS its visual size, but Text has its own
+      // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
+      // only touches hit-area bookkeeping, not what's actually drawn.
+      if ('width' in element.props) {
+        element.props.width = elWidth
+        element.props.height = elHeight
+        if (typeof gameObject.setFixedSize === 'function') {
+          gameObject.setFixedSize(elWidth, elHeight)
+          this.applyTextLayout(element)
+        } else {
+          gameObject.setSize(elWidth, elHeight)
+        }
+      }
       gameObject.x = elLeft + gameObject.originX * elWidth
       gameObject.y = elTop + gameObject.originY * elHeight
-
-      element.props.width = elWidth
-      element.props.height = elHeight
       element.props.x = gameObject.x
       element.props.y = gameObject.y
     }
