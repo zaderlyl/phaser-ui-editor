@@ -744,10 +744,15 @@ export class EditorScene extends Phaser.Scene {
     if ('width' in patch || 'height' in patch) {
       // A Rectangle's setSize() IS its visual size, but Text has its own
       // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
-      // only touches hit-area bookkeeping, not what's actually drawn.
+      // only touches hit-area bookkeeping, not what's actually drawn. An
+      // Image has no setSize() at all (its size is computed from the
+      // texture) — setDisplaySize() is the equivalent that actually
+      // stretches the rendered image.
       if (typeof gameObject.setFixedSize === 'function') {
         gameObject.setFixedSize(element.props.width, element.props.height)
         this.applyTextLayout(element)
+      } else if (typeof gameObject.setDisplaySize === 'function') {
+        gameObject.setDisplaySize(element.props.width, element.props.height)
       } else {
         gameObject.setSize(element.props.width, element.props.height)
       }
@@ -1042,13 +1047,16 @@ export class EditorScene extends Phaser.Scene {
       // `continue`s above). A Rectangle's setSize() IS its visual size, but
       // Text has its own fixed-size + word-wrap mechanism (see text.js) —
       // setSize() on Text only touches hit-area bookkeeping, not what's
-      // actually drawn.
+      // actually drawn. An Image has no setSize() at all — setDisplaySize()
+      // is what actually stretches the rendered image.
       if ('width' in element.props) {
         element.props.width = elWidth
         element.props.height = elHeight
         if (typeof gameObject.setFixedSize === 'function') {
           gameObject.setFixedSize(elWidth, elHeight)
           this.applyTextLayout(element)
+        } else if (typeof gameObject.setDisplaySize === 'function') {
+          gameObject.setDisplaySize(elWidth, elHeight)
         } else {
           gameObject.setSize(elWidth, elHeight)
         }

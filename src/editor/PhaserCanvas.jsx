@@ -19,6 +19,12 @@ export function PhaserCanvas({
   const containerRef = useRef(null)
   const gameRef = useRef(null)
   const sceneRef = useRef(null)
+  const fileInputRef = useRef(null)
+  // Where to place the image once a file is actually chosen — Image has
+  // no sensible default content, so unlike every other component, its
+  // drop doesn't call addElement() directly (see handleDrop/
+  // handleImageFileChange below).
+  const pendingImageDropRef = useRef(null)
   // Double-clicking a text element (see EditorScene's 'starttextedit')
   // opens this <textarea> overlay positioned right on top of it — Phaser
   // itself has no text input, so editing happens in real DOM instead, and
@@ -108,8 +114,67 @@ export function PhaserCanvas({
     const x = (event.clientX - rect.left) * scaleX
     const y = (event.clientY - rect.top) * scaleY
 
+    if (type === 'image') {
+      // No sensible default content to place immediately — remember
+      // where the drop happened and ask for a file instead; the element
+      // is only created once handleImageFileChange's texture actually
+      // finishes loading.
+      pendingImageDropRef.current = { x, y }
+      fileInputRef.current?.click()
+      return
+    }
+
     const element = scene.addElement(type, { x, y, originX: 0.5, originY: 0.5 })
     scene.selectElement(element.id)
+  }
+
+  // A picture larger than this on its longest side is scaled down for its
+  // initial display size (still at native resolution otherwise) — purely
+  // so a big photo doesn't drop in dwarfing the whole 1280x720 canvas;
+  // the user can resize it larger afterward like any other element.
+  const MAX_INITIAL_IMAGE_DIMENSION = 400
+
+  const handleImageFileChange = (event) => {
+    const file = event.target.files?.[0]
+    const drop = pendingImageDropRef.current
+    pendingImageDropRef.current = null
+    event.target.value = '' // otherwise re-picking the same file wouldn't fire onChange again
+    if (!file || !drop) return
+
+    const scene = sceneRef.current
+    if (!scene) return
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const dataUrl = reader.result
+      // Unique per upload so re-importing different files never collides
+      // in Phaser's shared texture cache.
+      const textureKey = `image-${crypto.randomUUID()}`
+
+      // addBase64 decodes the image asynchronously (it's a real
+      // HTMLImageElement load under the hood) — the texture, and its
+      // now-known natural size, aren't available until this fires.
+      scene.textures.once(`addtexture-${textureKey}`, () => {
+        const source = scene.textures.get(textureKey).getSourceImage()
+        const scale = Math.min(1, MAX_INITIAL_IMAGE_DIMENSION / Math.max(source.width, source.height))
+        const width = Math.round(source.width * scale)
+        const height = Math.round(source.height * scale)
+
+        const element = scene.addElement('image', {
+          x: drop.x,
+          y: drop.y,
+          width,
+          height,
+          textureKey,
+          imageData: dataUrl,
+          originX: 0.5,
+          originY: 0.5,
+        })
+        scene.selectElement(element.id)
+      })
+      scene.textures.addBase64(textureKey, dataUrl)
+    }
+    reader.readAsDataURL(file)
   }
 
   const commitTextEdit = () => {
@@ -149,6 +214,13 @@ export function PhaserCanvas({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleImageFileChange}
+      />
       {editingText && (
         <textarea
           autoFocus
