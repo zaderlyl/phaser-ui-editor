@@ -12,19 +12,17 @@ const defaultProps = {
   height: 24,
   backgroundColor: 0x374151,
   fillColor: 0x22c55e,
-  // Kept simple for now (no properties-panel control yet, see the wider
-  // Barre de progression plan) — the plumbing already supports any 0-100
-  // value so a later step only needs to add the field, not touch create()/
-  // syncVisual().
   value: 60,
   originX: 0,
   originY: 0,
 }
 
 // The fill's width for a given value — shared by create() and syncVisual()
-// so both always agree on what "60%" actually looks like.
+// so both always agree on what "60%" actually looks like. Clamped so a
+// value typed outside 0-100 in the properties panel can't make the fill
+// spill past the track or go negative.
 function fillWidthFor(width, value) {
-  return Math.max(0, (width * value) / 100)
+  return Math.max(0, Math.min(width, (width * value) / 100))
 }
 
 function create(scene, props) {

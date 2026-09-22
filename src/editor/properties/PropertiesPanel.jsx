@@ -333,6 +333,19 @@ export function PropertiesPanel({
         </button>
       )}
 
+      {'value' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Valeur</span>
+          <input
+            type="number"
+            min="0"
+            max="100"
+            value={props.value}
+            onChange={handleNumberChange('value')}
+          />
+        </div>
+      )}
+
       {'width' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Taille</span>
