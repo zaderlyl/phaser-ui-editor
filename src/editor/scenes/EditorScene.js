@@ -754,12 +754,17 @@ export class EditorScene extends Phaser.Scene {
     if ('align' in patch && typeof gameObject.setAlign === 'function') {
       gameObject.setAlign(element.props.align)
     }
-    if (
-      ('strokeColor' in patch || 'strokeThickness' in patch) &&
-      typeof gameObject.setStroke === 'function'
-    ) {
+    if ('strokeColor' in patch || 'strokeThickness' in patch) {
+      // Same 0xRRGGBB-number props power a border on both, but a Rectangle
+      // (Button) and a Text take it via different APIs — a Rectangle's
+      // setStrokeStyle(width, numericColor) vs. Text's setStroke(cssColor,
+      // width), argument order and color format both differ.
       const { strokeColor, strokeThickness } = element.props
-      gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+      if (typeof gameObject.setStrokeStyle === 'function') {
+        gameObject.setStrokeStyle(strokeThickness, strokeColor)
+      } else if (typeof gameObject.setStroke === 'function') {
+        gameObject.setStroke(`#${strokeColor.toString(16).padStart(6, '0')}`, strokeThickness)
+      }
     }
     if ('padding' in patch || 'verticalAlign' in patch) {
       this.applyTextLayout(element)
