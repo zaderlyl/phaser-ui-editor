@@ -95,6 +95,12 @@ const defaultProps = {
   iconEndData: '',
   iconSize: 32,
   iconGap: 8,
+  // Generic (gated on 'visible' in props in PropertiesPanel.jsx, not
+  // specific to ProgressBar) show/hide toggle — lets a créa keep a bar
+  // around without deleting it (e.g. one meant to be shown later by code
+  // they'll write once export exists) while it stays selectable from the
+  // layers panel, same as a hidden layer in Figma.
+  visible: true,
   originX: 0,
   originY: 0,
 }
@@ -442,6 +448,7 @@ function create(scene, props) {
     labelFormat,
     labelColor,
     labelFontSize,
+    visible,
     originX,
     originY,
   } = props
@@ -494,6 +501,7 @@ function create(scene, props) {
 
   const container = scene.add.container(left, top, [boundsZone, background, fill, label])
   container.setSize(width, height)
+  container.setVisible(visible)
   container.setData('boundsZone', boundsZone)
   container.setData('background', background)
   container.setData('fill', fill)
@@ -533,11 +541,13 @@ function syncVisual(container, props, scene) {
     labelFormat,
     labelColor,
     labelFontSize,
+    visible,
   } = props
   const boundsZone = container.getData('boundsZone')
   const background = container.getData('background')
   const label = container.getData('label')
 
+  container.setVisible(visible)
   boundsZone.setSize(width, height)
 
   drawBackground(background, width, height, backgroundColor, strokeColor, strokeThickness, cornerRadius)

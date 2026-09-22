@@ -232,6 +232,19 @@ export function PropertiesPanel({
         </div>
       </div>
 
+      {'visible' in props && (
+        <div className="properties-panel__group">
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.visible}
+              onChange={handleCheckboxChange('visible')}
+            />
+            Visible
+          </label>
+        </div>
+      )}
+
       {'text' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Contenu</span>
