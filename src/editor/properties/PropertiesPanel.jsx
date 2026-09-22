@@ -125,6 +125,10 @@ export function PropertiesPanel({
     onChange(id, { text: event.target.value })
   }
 
+  const handleCallbackChange = (event) => {
+    onChange(id, { callback: event.target.value })
+  }
+
   const handleCheckboxChange = (key) => (event) => {
     onChange(id, { [key]: event.target.checked })
   }
@@ -170,6 +174,13 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Contenu</span>
           <textarea value={props.text} onChange={handleTextChange} rows={3} />
+        </div>
+      )}
+
+      {'callback' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Callback (clic)</span>
+          <input type="text" value={props.callback} onChange={handleCallbackChange} />
         </div>
       )}
 

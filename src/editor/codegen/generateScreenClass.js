@@ -51,18 +51,42 @@ function generateEntryCode(element, elements, indent) {
   return `${indent}${generateElementCode(element)}`
 }
 
+// One stub method per unique callback name across every element that
+// declares one (currently just Button, via getCallbackName/
+// generateCallbackStub) — several buttons can share a callback (e.g. two
+// "Retry" buttons), so the class gets one method for it, not a duplicate
+// per button that uses it. elements is the full flat list (top-level and
+// nested group children alike), so this needs no recursion.
+function collectCallbackStubs(elements) {
+  const seen = new Set()
+  const stubs = []
+  for (const element of elements) {
+    const definition = componentLibrary.find((component) => component.type === element.type)
+    if (typeof definition?.getCallbackName !== 'function') continue
+    const name = definition.getCallbackName(element)
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    stubs.push(definition.generateCallbackStub(name))
+  }
+  return stubs
+}
+
 // Turns the current screen (elements in back-to-front order, same as
 // EditorScene.elements) into a standalone Phaser.GameObjects.Container
 // subclass, matching the cahier des charges' export format: a constructor
 // that builds every named child (groups become nested Containers, see
 // generateGroupCode), adds them to the container in the same back-to-front
-// order (so Phaser's own paint order matches the editor's), and a minimal
-// open()/close() API.
+// order (so Phaser's own paint order matches the editor's), a minimal
+// open()/close() API, and a stub method per button callback so the file
+// runs immediately instead of throwing on an undefined method the first
+// time someone clicks.
 export function generateScreenClass(elements, className = 'Screen') {
   const topLevel = elements.filter((element) => !element.parentId)
   const constructorLines = topLevel.map((element) => generateEntryCode(element, elements, '    '))
   const childRefs = topLevel.map((element) => `this.${element.props.name}`)
   const addChildrenLine = childRefs.length > 0 ? `    this.add([${childRefs.join(', ')}]);` : ''
+  const callbackStubs = collectCallbackStubs(elements)
+  const callbackStubsBlock = callbackStubs.length > 0 ? `\n${callbackStubs.join('\n\n')}\n` : ''
 
   return `export default class ${className} extends Phaser.GameObjects.Container {
   constructor(scene) {
@@ -82,6 +106,6 @@ ${addChildrenLine}
   close() {
     this.setVisible(false);
   }
-}
+${callbackStubsBlock}}
 `
 }

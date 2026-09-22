@@ -15,6 +15,7 @@ const defaultProps = {
   strokeColor: 0x2563eb,
   strokeThickness: 2,
   text: 'Bouton',
+  callback: 'onButtonClick',
   originX: 0,
   originY: 0,
 }
@@ -74,7 +75,7 @@ function syncVisual(container, props) {
 }
 
 function generateCode({ props }) {
-  const { name, x, y, width, height, color, strokeColor, strokeThickness, text } = props
+  const { name, x, y, width, height, color, strokeColor, strokeThickness, text, callback } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
   const escapedText = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
@@ -83,12 +84,31 @@ function generateCode({ props }) {
   // returns with a single leading indent and nothing else, so continuation
   // lines carry their own — matching the flat 4-space indent every entry
   // (top-level or nested in a group) already uses throughout that file.
+  // The click itself just calls this.<callback>() — generateScreenClass
+  // collects every button's callback name (see getCallbackName below) and
+  // adds one stub method per unique name, so the file is ready to run
+  // (clicking does nothing until filled in) instead of throwing on an
+  // undefined method the first time someone clicks.
   return [
     `this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
     `this.${name}Background = scene.add.rectangle(0, 0, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(0, 0);`,
     `this.${name}Label = scene.add.text(${Math.round(width) / 2}, ${Math.round(height) / 2}, '${escapedText}', { fontSize: '${LABEL_FONT_SIZE}px', color: '${LABEL_COLOR}' }).setOrigin(0.5, 0.5);`,
     `this.${name}.add([this.${name}Background, this.${name}Label]);`,
+    `this.${name}.setInteractive({ useHandCursor: true });`,
+    `this.${name}.on('pointerdown', () => this.${callback}());`,
   ].join('\n    ')
+}
+
+// The name of the method a click on this button should call — read by
+// generateScreenClass to build the deduplicated list of stub methods it
+// appends to the class (several buttons can share one callback name; the
+// stub is only generated once).
+function getCallbackName({ props }) {
+  return props.callback
+}
+
+function generateCallbackStub(name) {
+  return [`  ${name}() {`, '    // TODO: implement', '  }'].join('\n')
 }
 
 export const buttonComponent = {
@@ -98,4 +118,6 @@ export const buttonComponent = {
   create,
   generateCode,
   syncVisual,
+  getCallbackName,
+  generateCallbackStub,
 }
