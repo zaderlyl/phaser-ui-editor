@@ -71,6 +71,17 @@ const defaultProps = {
   // itself still respects cornerRadius).
   segments: 0,
   segmentGap: 4,
+  // A diagonal two-color (activeFillColor + stripeColor) stripe pattern
+  // instead of a flat/gradient fill — the classic "in progress" barber-
+  // pole look. Takes precedence over the gradient (fillGradientEnd is
+  // ignored while striped) but not over segments (segmented still wins if
+  // both are set, since combining discrete blocks with diagonal stripes
+  // needs its own per-block handling this doesn't attempt yet); square
+  // corners regardless of cornerRadius, same simplification as segmented
+  // mode.
+  striped: false,
+  stripeColor: 0xffffff,
+  stripeWidth: 16,
   // An optional icon just before/after the bar (e.g. a heart next to a
   // life bar) — empty key means no icon, same as Image's own textureKey/
   // imageData pair (imageData is kept only for a future export step, same
@@ -194,8 +205,66 @@ function labelText(value, maxValue, ratio, labelFormat) {
     : `${Math.round(ratio * 100)}%`
 }
 
-function labelColorHex(labelColor) {
-  return `#${labelColor.toString(16).padStart(6, '0')}`
+function colorToHex(color) {
+  return `#${color.toString(16).padStart(6, '0')}`
+}
+
+// A seamless 45°-diagonal two-color tile: color1 fills the whole tile,
+// then a color2 triangle covers the half above the tile's own main
+// diagonal. Tiled edge-to-edge (via a TileSprite, see syncStripeTile),
+// each tile's diagonal edge lines up with its neighbors', so the result
+// reads as continuous parallel stripes rather than a checkerboard — the
+// standard, simplest way to build a diagonal stripe texture without
+// per-pixel drawing or masking. tileSize doubles as the visual stripe
+// width. Reuses (redraws into) the same canvas texture on every call
+// rather than creating a new one, since colors/width can change live from
+// the properties panel and Phaser has no "just recolor this Graphics"
+// equivalent for a texture.
+function drawStripeTexture(scene, key, color1, color2, tileSize) {
+  const texture = scene.textures.exists(key) ? scene.textures.get(key) : scene.textures.createCanvas(key, tileSize, tileSize)
+  if (texture.width !== tileSize || texture.height !== tileSize) texture.setSize(tileSize, tileSize)
+
+  const ctx = texture.getContext()
+  ctx.clearRect(0, 0, tileSize, tileSize)
+  ctx.fillStyle = colorToHex(color1)
+  ctx.fillRect(0, 0, tileSize, tileSize)
+  ctx.fillStyle = colorToHex(color2)
+  ctx.beginPath()
+  ctx.moveTo(0, 0)
+  ctx.lineTo(tileSize, 0)
+  ctx.lineTo(tileSize, tileSize)
+  ctx.closePath()
+  ctx.fill()
+  texture.refresh()
+}
+
+// Creates, updates or hides the striped-mode TileSprite — a plain
+// rectangle tiled with the stripe texture above, sized/positioned exactly
+// like the continuous fill's own geometry (no rounding: see the
+// defaultProps note on why). Needs the scene the same way syncIconSlot
+// does, for the same reason (creating a new game object on the fly the
+// first time it's actually needed).
+function syncStripeTile(container, scene, geo, color1, color2, tileSize) {
+  let tile = container.getData('stripeTile')
+
+  if (geo.width <= 0 || geo.height <= 0) {
+    tile?.setVisible(false)
+    return
+  }
+
+  let textureKey = container.getData('stripeTextureKey')
+  if (!textureKey) {
+    textureKey = `progressbar-stripe-${crypto.randomUUID()}`
+    container.setData('stripeTextureKey', textureKey)
+  }
+  drawStripeTexture(scene, textureKey, color1, color2, tileSize)
+
+  if (!tile) {
+    tile = scene.add.tileSprite(geo.x, geo.y, geo.width, geo.height, textureKey).setOrigin(0, 0)
+    container.add(tile)
+    container.setData('stripeTile', tile)
+  }
+  tile.setTexture(textureKey).setPosition(geo.x, geo.y).setSize(geo.width, geo.height).setVisible(true)
 }
 
 // Where a 'Start'/'End' icon sits, centered outside the bar's own box —
@@ -317,13 +386,38 @@ function drawSegmentedFill(graphics, width, height, orientation, direction, padd
 // Dispatches to the continuous or segmented renderer depending on
 // segments — shared by create() and syncVisual() so both always agree on
 // which mode is active.
-function renderFill(fill, props, ratio, activeColor) {
-  const { width, height, orientation, direction, padding, cornerRadius, fillGradientEnd, segments, segmentGap } =
-    props
+function renderFill(container, scene, props, ratio, activeColor) {
+  const {
+    width,
+    height,
+    orientation,
+    direction,
+    padding,
+    cornerRadius,
+    fillGradientEnd,
+    segments,
+    segmentGap,
+    striped,
+    stripeColor,
+    stripeWidth,
+  } = props
+  const fill = container.getData('fill')
+  const stripeTile = container.getData('stripeTile')
+
   if (segments > 1) {
+    stripeTile?.setVisible(false)
     drawSegmentedFill(fill, width, height, orientation, direction, padding, segments, segmentGap, ratio, activeColor)
     return
   }
+
+  if (striped) {
+    fill.clear()
+    const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
+    syncStripeTile(container, scene, geo, activeColor, stripeColor, stripeWidth)
+    return
+  }
+
+  stripeTile?.setVisible(false)
   const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   drawFill(fill, geo, activeColor, fillGradientEnd, orientation, direction, cornerRadius)
 }
@@ -368,15 +462,17 @@ function create(scene, props) {
   const background = scene.add.graphics()
   drawBackground(background, width, height, backgroundColor, strokeColor, strokeThickness, cornerRadius)
 
+  // Drawn into (or left empty in favor of the stripeTile) below, once the
+  // container actually exists — renderFill needs it (via container.
+  // getData) to find/create the striped-mode TileSprite too.
   const fill = scene.add.graphics()
   const ratio = fillRatio(value, minValue, maxValue)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  renderFill(fill, props, ratio, activeColor)
 
   const label = scene.add
     .text(width / 2, height / 2, labelText(value, maxValue, ratio, labelFormat), {
       fontSize: `${labelFontSize}px`,
-      color: labelColorHex(labelColor),
+      color: colorToHex(labelColor),
     })
     .setOrigin(0.5, 0.5)
     .setVisible(showLabel)
@@ -403,6 +499,7 @@ function create(scene, props) {
   container.setData('fill', fill)
   container.setData('label', label)
 
+  renderFill(container, scene, props, ratio, activeColor)
   syncIconSlot(container, scene, 'Start', props)
   syncIconSlot(container, scene, 'End', props)
 
@@ -413,11 +510,11 @@ function create(scene, props) {
 // needed after any change to width/height/backgroundColor/fillColor/
 // fillGradientEnd/fillColorLow/lowThreshold/value/minValue/maxValue/
 // orientation/direction/strokeColor/strokeThickness/padding/cornerRadius/
-// segments/segmentGap/showLabel/labelFormat/labelColor/labelFontSize/
-// icon*, since none of those live on the Container itself (see
-// EditorScene's syncCompositeVisual, the only caller — also the source of
-// the `scene` argument, needed the first time an icon slot gets a
-// texture).
+// segments/segmentGap/striped/stripeColor/stripeWidth/showLabel/
+// labelFormat/labelColor/labelFontSize/icon*, since none of those live on
+// the Container itself (see EditorScene's syncCompositeVisual, the only
+// caller — also the source of the `scene` argument, needed the first time
+// an icon slot or the striped TileSprite gets created).
 function syncVisual(container, props, scene) {
   const {
     width,
@@ -439,7 +536,6 @@ function syncVisual(container, props, scene) {
   } = props
   const boundsZone = container.getData('boundsZone')
   const background = container.getData('background')
-  const fill = container.getData('fill')
   const label = container.getData('label')
 
   boundsZone.setSize(width, height)
@@ -448,12 +544,12 @@ function syncVisual(container, props, scene) {
 
   const ratio = fillRatio(value, minValue, maxValue)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  renderFill(fill, props, ratio, activeColor)
+  renderFill(container, scene, props, ratio, activeColor)
 
   label
     .setText(labelText(value, maxValue, ratio, labelFormat))
     .setFontSize(labelFontSize)
-    .setColor(labelColorHex(labelColor))
+    .setColor(colorToHex(labelColor))
     .setPosition(width / 2, height / 2)
     .setVisible(showLabel)
 

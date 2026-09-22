@@ -155,6 +155,10 @@ export function PropertiesPanel({
     onChange(id, { fillGradientEnd: hexToColorNumber(event.target.value) })
   }
 
+  const handleStripeColorChange = (event) => {
+    onChange(id, { stripeColor: hexToColorNumber(event.target.value) })
+  }
+
   const handleLabelColorChange = (event) => {
     onChange(id, { labelColor: hexToColorNumber(event.target.value) })
   }
@@ -654,6 +658,39 @@ export function PropertiesPanel({
                 min="0"
                 value={props.segmentGap}
                 onChange={handleNumberChange('segmentGap')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'striped' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Rayures</span>
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.striped}
+              onChange={handleCheckboxChange('striped')}
+            />
+            Motif rayé
+          </label>
+          <div className="properties-panel__row">
+            <label>
+              Couleur
+              <input
+                type="color"
+                value={colorNumberToHex(props.stripeColor)}
+                onChange={handleStripeColorChange}
+              />
+            </label>
+            <label>
+              Largeur
+              <input
+                type="number"
+                min="1"
+                value={props.stripeWidth}
+                onChange={handleNumberChange('stripeWidth')}
               />
             </label>
           </div>
