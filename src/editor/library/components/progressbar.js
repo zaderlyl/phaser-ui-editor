@@ -17,7 +17,11 @@ const defaultProps = {
   fillColor: 0x22c55e,
   // Same value as fillColor by default, so a fresh bar renders as a flat
   // color (no visible gradient) until a créa picks a different end color —
-  // opt-in, like every other advanced knob here.
+  // opt-in, like every other advanced knob here. Only takes effect with
+  // square corners (cornerRadius 0 for the fill's own rounded corners,
+  // see drawFill) — Phaser's fillGradientStyle doesn't interpolate
+  // correctly across fillRoundedRect's arc tessellation, confirmed via a
+  // real pixel scan, so a rounded fill falls back to a flat colorStart.
   fillGradientEnd: 0x22c55e,
   // When the ratio drops to/below lowThreshold percent, the fill switches
   // to fillColorLow instead — the common health/mana-bar "flash red when
@@ -358,16 +362,24 @@ function drawFill(graphics, geo, colorStart, colorEnd, orientation, direction, c
   graphics.clear()
   if (geo.width <= 0 || geo.height <= 0) return
 
-  if (orientation === 'vertical') {
-    graphics.fillGradientStyle(colorStart, colorStart, colorEnd, colorEnd, 1)
-  } else {
-    graphics.fillGradientStyle(colorStart, colorEnd, colorStart, colorEnd, 1)
-  }
-
   const radius = fillCornerRadius(cornerRadius, geo, orientation, direction)
+
   if (radius === 0) {
+    if (orientation === 'vertical') {
+      graphics.fillGradientStyle(colorStart, colorStart, colorEnd, colorEnd, 1)
+    } else {
+      graphics.fillGradientStyle(colorStart, colorEnd, colorStart, colorEnd, 1)
+    }
     graphics.fillRect(geo.x, geo.y, geo.width, geo.height)
   } else {
+    // fillGradientStyle's 4 corner colors assume a plain rectangle's own
+    // triangulation — confirmed (via a real pixel scan, not just visual
+    // inspection) to interpolate incorrectly once fillRoundedRect's arc
+    // tessellation is involved instead, producing a non-monotonic, banded
+    // result rather than a clean gradient. Falling back to a solid
+    // colorStart fill avoids that rather than shipping a broken-looking
+    // gradient; the two-color gradient stays available on square corners.
+    graphics.fillStyle(colorStart, 1)
     graphics.fillRoundedRect(geo.x, geo.y, geo.width, geo.height, radius)
   }
 }
@@ -567,10 +579,136 @@ function syncVisual(container, props, scene) {
   syncIconSlot(container, scene, 'End', props)
 }
 
+// Exports a static snapshot at the current value — not yet a live API a
+// player's own game code could call to update the bar at runtime (e.g.
+// `setValue(75)`), which is the obvious next step but a separate one:
+// this first covers the same "just get it on screen correctly" ground
+// Image's own first export step did. Reuses this module's own
+// fillRatio/activeFillColor/fillGeometry/fillCornerRadius/labelText —
+// safe here since generateCode runs in the *editor's* JS context to
+// compute what to embed, not in the exported game.
+//
+// segments, striped and the icon slots aren't supported yet — each needs
+// its own generated-code shape (a segment loop; a tileable stripe texture
+// baked as base64, similar to Image; an async icon load, again similar to
+// Image) that a live snapshot doesn't need. Throwing here (matching the
+// existing "doesn't support code generation yet" error for a type with no
+// generateCode at all) beats silently exporting a bar that looks
+// different from the one on the canvas.
+function generateCode({ props }) {
+  if (props.segments > 1) {
+    throw new Error('ProgressBar export does not support segmented mode yet')
+  }
+  if (props.striped) {
+    throw new Error('ProgressBar export does not support the striped fill yet')
+  }
+  if (props.iconStartKey || props.iconEndKey) {
+    throw new Error('ProgressBar export does not support icons yet')
+  }
+
+  const {
+    name,
+    x,
+    y,
+    width,
+    height,
+    backgroundColor,
+    fillColor,
+    fillGradientEnd,
+    fillColorLow,
+    lowThreshold,
+    value,
+    minValue,
+    maxValue,
+    orientation,
+    direction,
+    strokeColor,
+    strokeThickness,
+    padding,
+    cornerRadius,
+    showLabel,
+    labelFormat,
+    labelColor,
+    labelFontSize,
+    visible,
+  } = props
+
+  const ratio = fillRatio(value, minValue, maxValue)
+  const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
+  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
+  const radius = fillCornerRadius(cornerRadius, geo, orientation, direction)
+
+  const hexBackground = `0x${backgroundColor.toString(16).padStart(6, '0')}`
+  const hexStroke = `0x${strokeColor.toString(16).padStart(6, '0')}`
+  const hexFillStart = `0x${activeColor.toString(16).padStart(6, '0')}`
+  const hexFillEnd = `0x${fillGradientEnd.toString(16).padStart(6, '0')}`
+  const w = Math.round(width)
+  const h = Math.round(height)
+
+  const lines = [`this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`]
+
+  lines.push(`this.${name}Background = scene.add.graphics();`)
+  lines.push(`this.${name}Background.fillStyle(${hexBackground}, 1);`)
+  lines.push(
+    cornerRadius > 0
+      ? `this.${name}Background.fillRoundedRect(0, 0, ${w}, ${h}, ${Math.round(cornerRadius)});`
+      : `this.${name}Background.fillRect(0, 0, ${w}, ${h});`,
+  )
+  if (strokeThickness > 0) {
+    lines.push(`this.${name}Background.lineStyle(${strokeThickness}, ${hexStroke}, 1);`)
+    lines.push(
+      cornerRadius > 0
+        ? `this.${name}Background.strokeRoundedRect(0, 0, ${w}, ${h}, ${Math.round(cornerRadius)});`
+        : `this.${name}Background.strokeRect(0, 0, ${w}, ${h});`,
+    )
+  }
+
+  const children = [`this.${name}Background`]
+
+  if (geo.width > 0 && geo.height > 0) {
+    lines.push(`this.${name}Fill = scene.add.graphics();`)
+    const gx = Math.round(geo.x)
+    const gy = Math.round(geo.y)
+    const gw = Math.round(geo.width)
+    const gh = Math.round(geo.height)
+    if (radius === 0) {
+      // See drawFill's comment: fillGradientStyle only interpolates
+      // correctly across a plain fillRect, not fillRoundedRect's arc
+      // tessellation — confirmed via a real pixel scan of the rendered
+      // output, not just visual inspection.
+      lines.push(
+        orientation === 'vertical'
+          ? `this.${name}Fill.fillGradientStyle(${hexFillStart}, ${hexFillStart}, ${hexFillEnd}, ${hexFillEnd}, 1);`
+          : `this.${name}Fill.fillGradientStyle(${hexFillStart}, ${hexFillEnd}, ${hexFillStart}, ${hexFillEnd}, 1);`,
+      )
+      lines.push(`this.${name}Fill.fillRect(${gx}, ${gy}, ${gw}, ${gh});`)
+    } else {
+      lines.push(`this.${name}Fill.fillStyle(${hexFillStart}, 1);`)
+      lines.push(`this.${name}Fill.fillRoundedRect(${gx}, ${gy}, ${gw}, ${gh}, ${JSON.stringify(radius)});`)
+    }
+    children.push(`this.${name}Fill`)
+  }
+
+  if (showLabel) {
+    const text = labelText(value, maxValue, ratio, labelFormat)
+    lines.push(
+      `this.${name}Label = scene.add.text(${w / 2}, ${h / 2}, '${text}', { fontSize: '${labelFontSize}px', color: '${colorToHex(labelColor)}' }).setOrigin(0.5, 0.5);`,
+    )
+    children.push(`this.${name}Label`)
+  }
+
+  lines.push(`this.${name}.add([${children.join(', ')}]);`)
+  lines.push(`this.${name}.setSize(${w}, ${h});`)
+  if (!visible) lines.push(`this.${name}.setVisible(false);`)
+
+  return lines.join('\n    ')
+}
+
 export const progressBarComponent = {
   type: 'progressbar',
   label: 'Barre de progression',
   defaultProps,
   create,
   syncVisual,
+  generateCode,
 }

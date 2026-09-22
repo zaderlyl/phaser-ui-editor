@@ -14,10 +14,19 @@ export function ExportModal({ elements, onClose }) {
 
   const isValidClassName = IDENTIFIER_PATTERN.test(className)
   const effectiveClassName = isValidClassName ? className : 'Screen'
-  const code = useMemo(
-    () => generateScreenClass(elements, effectiveClassName),
-    [elements, effectiveClassName],
-  )
+  // generateScreenClass throws for an element a component's generateCode
+  // doesn't (yet) support — e.g. a ProgressBar using segments/striped/an
+  // icon, or any type with no generateCode at all — rather than silently
+  // exporting something that doesn't match the canvas. useMemo doesn't
+  // catch that on its own, so it's caught here instead of crashing the
+  // whole modal (or the app, absent an error boundary).
+  const { code, error } = useMemo(() => {
+    try {
+      return { code: generateScreenClass(elements, effectiveClassName), error: null }
+    } catch (thrown) {
+      return { code: '', error: thrown.message }
+    }
+  }, [elements, effectiveClassName])
 
   // The Clipboard API can throw for reasons outside our control (denied
   // permission, insecure context, an unfocused document) — fall back to
@@ -71,9 +80,13 @@ export function ExportModal({ elements, onClose }) {
           </p>
         )}
 
-        <pre className="export-modal__code">
-          <code ref={codeRef}>{code}</code>
-        </pre>
+        {error ? (
+          <p className="export-modal__error">Export impossible : {error}</p>
+        ) : (
+          <pre className="export-modal__code">
+            <code ref={codeRef}>{code}</code>
+          </pre>
+        )}
 
         {copyState === 'error' && (
           <p className="export-modal__error">
@@ -82,10 +95,10 @@ export function ExportModal({ elements, onClose }) {
         )}
 
         <div className="export-modal__actions">
-          <button type="button" onClick={handleCopy}>
+          <button type="button" onClick={handleCopy} disabled={!!error}>
             {copyState === 'copied' ? 'Copié !' : 'Copier'}
           </button>
-          <button type="button" onClick={handleDownload}>
+          <button type="button" onClick={handleDownload} disabled={!!error}>
             Télécharger .js
           </button>
         </div>
