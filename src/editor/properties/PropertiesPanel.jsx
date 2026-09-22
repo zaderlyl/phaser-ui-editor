@@ -129,6 +129,14 @@ export function PropertiesPanel({
     onChange(id, { hoverStrokeColor: hexToColorNumber(event.target.value) })
   }
 
+  const handlePressedColorChange = (event) => {
+    onChange(id, { pressedColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handlePressedStrokeColorChange = (event) => {
+    onChange(id, { pressedStrokeColor: hexToColorNumber(event.target.value) })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -358,6 +366,30 @@ export function PropertiesPanel({
                 type="color"
                 value={colorNumberToHex(props.hoverStrokeColor)}
                 onChange={handleHoverStrokeColorChange}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
+      {'pressedColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur (clic)</span>
+          <div className="properties-panel__row">
+            <label>
+              Fond
+              <input
+                type="color"
+                value={colorNumberToHex(props.pressedColor)}
+                onChange={handlePressedColorChange}
+              />
+            </label>
+            <label>
+              Contour
+              <input
+                type="color"
+                value={colorNumberToHex(props.pressedStrokeColor)}
+                onChange={handlePressedStrokeColorChange}
               />
             </label>
           </div>

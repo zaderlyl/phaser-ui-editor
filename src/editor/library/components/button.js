@@ -15,6 +15,8 @@ const defaultProps = {
   strokeColor: 0x2563eb,
   hoverColor: 0x60a5fa,
   hoverStrokeColor: 0x2563eb,
+  pressedColor: 0x1d4ed8,
+  pressedStrokeColor: 0x1e40af,
   strokeThickness: 2,
   text: 'Bouton',
   callback: 'onButtonClick',
@@ -87,6 +89,8 @@ function generateCode({ props }) {
     strokeColor,
     hoverColor,
     hoverStrokeColor,
+    pressedColor,
+    pressedStrokeColor,
     strokeThickness,
     text,
     callback,
@@ -95,6 +99,8 @@ function generateCode({ props }) {
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
   const hexHoverColor = `0x${hoverColor.toString(16).padStart(6, '0')}`
   const hexHoverStrokeColor = `0x${hoverStrokeColor.toString(16).padStart(6, '0')}`
+  const hexPressedColor = `0x${pressedColor.toString(16).padStart(6, '0')}`
+  const hexPressedStrokeColor = `0x${pressedStrokeColor.toString(16).padStart(6, '0')}`
   const escapedText = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
 
   // generateElementCode() (see generateScreenClass.js) wraps whatever this
@@ -105,10 +111,14 @@ function generateCode({ props }) {
   // collects every button's callback name (see getCallbackName below) and
   // adds one stub method per unique name, so the file is ready to run
   // (clicking does nothing until filled in) instead of throwing on an
-  // undefined method the first time someone clicks. pointerover/pointerout
-  // swap the background straight to the hover/normal colors — no state is
-  // kept for it (unlike the editor's own live props), since the exported
-  // game is the only place hover ever actually happens.
+  // undefined method the first time someone clicks. pointerover/pointerout/
+  // pointerdown/pointerup swap the background straight to the matching
+  // color pair — no state is kept for it (unlike the editor's own live
+  // props), since the exported game is the only place any of this actually
+  // happens. pointerup goes back to the *hover* colors rather than normal,
+  // since releasing the pointer still over the button (the common case)
+  // should leave it looking hovered, not suddenly idle; pointerout already
+  // covers the pointer leaving while held down.
   return [
     `this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
     `this.${name}Background = scene.add.rectangle(0, 0, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(0, 0);`,
@@ -117,7 +127,8 @@ function generateCode({ props }) {
     `this.${name}.setInteractive({ useHandCursor: true });`,
     `this.${name}.on('pointerover', () => this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}));`,
     `this.${name}.on('pointerout', () => this.${name}Background.setFillStyle(${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}));`,
-    `this.${name}.on('pointerdown', () => this.${callback}());`,
+    `this.${name}.on('pointerdown', () => { this.${name}Background.setFillStyle(${hexPressedColor}).setStrokeStyle(${strokeThickness}, ${hexPressedStrokeColor}); this.${callback}(); });`,
+    `this.${name}.on('pointerup', () => this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}));`,
   ].join('\n    ')
 }
 
