@@ -20,6 +20,12 @@ const defaultProps = {
   strokeThickness: 2,
   text: 'Bouton',
   callback: 'onButtonClick',
+  // Unlike `callback`, these are opt-in: most buttons only need the color
+  // swap pointerover/pointerout already does, so an empty name means "no
+  // extra method call, no stub generated for it" rather than defaulting to
+  // yet another empty TODO stub every button would carry.
+  hoverCallback: '',
+  hoverOutCallback: '',
   originX: 0,
   originY: 0,
 }
@@ -94,6 +100,8 @@ function generateCode({ props }) {
     strokeThickness,
     text,
     callback,
+    hoverCallback,
+    hoverOutCallback,
   } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
@@ -102,13 +110,17 @@ function generateCode({ props }) {
   const hexPressedColor = `0x${pressedColor.toString(16).padStart(6, '0')}`
   const hexPressedStrokeColor = `0x${pressedStrokeColor.toString(16).padStart(6, '0')}`
   const escapedText = text.replace(/\\/g, '\\\\').replace(/'/g, "\\'")
+  // Empty means "no extra call" — see defaultProps' note on why these two
+  // are opt-in, unlike `callback`.
+  const hoverCallbackCall = hoverCallback ? ` this.${hoverCallback}();` : ''
+  const hoverOutCallbackCall = hoverOutCallback ? ` this.${hoverOutCallback}();` : ''
 
   // generateElementCode() (see generateScreenClass.js) wraps whatever this
   // returns with a single leading indent and nothing else, so continuation
   // lines carry their own — matching the flat 4-space indent every entry
   // (top-level or nested in a group) already uses throughout that file.
   // The click itself just calls this.<callback>() — generateScreenClass
-  // collects every button's callback name (see getCallbackName below) and
+  // collects every button's callback names (see getCallbackNames below) and
   // adds one stub method per unique name, so the file is ready to run
   // (clicking does nothing until filled in) instead of throwing on an
   // undefined method the first time someone clicks. pointerover/pointerout/
@@ -119,25 +131,36 @@ function generateCode({ props }) {
   // since releasing the pointer still over the button (the common case)
   // should leave it looking hovered, not suddenly idle; pointerout already
   // covers the pointer leaving while held down.
+  const overExpr = `this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor})`
+  const outExpr = `this.${name}Background.setFillStyle(${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor})`
+  const pointeroverLine = hoverCallback
+    ? `this.${name}.on('pointerover', () => { ${overExpr};${hoverCallbackCall} });`
+    : `this.${name}.on('pointerover', () => ${overExpr});`
+  const pointeroutLine = hoverOutCallback
+    ? `this.${name}.on('pointerout', () => { ${outExpr};${hoverOutCallbackCall} });`
+    : `this.${name}.on('pointerout', () => ${outExpr});`
+
   return [
     `this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
     `this.${name}Background = scene.add.rectangle(0, 0, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(0, 0);`,
     `this.${name}Label = scene.add.text(${Math.round(width) / 2}, ${Math.round(height) / 2}, '${escapedText}', { fontSize: '${LABEL_FONT_SIZE}px', color: '${LABEL_COLOR}' }).setOrigin(0.5, 0.5);`,
     `this.${name}.add([this.${name}Background, this.${name}Label]);`,
     `this.${name}.setInteractive({ useHandCursor: true });`,
-    `this.${name}.on('pointerover', () => this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}));`,
-    `this.${name}.on('pointerout', () => this.${name}Background.setFillStyle(${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}));`,
+    pointeroverLine,
+    pointeroutLine,
     `this.${name}.on('pointerdown', () => { this.${name}Background.setFillStyle(${hexPressedColor}).setStrokeStyle(${strokeThickness}, ${hexPressedStrokeColor}); this.${callback}(); });`,
     `this.${name}.on('pointerup', () => this.${name}Background.setFillStyle(${hexHoverColor}).setStrokeStyle(${strokeThickness}, ${hexHoverStrokeColor}));`,
   ].join('\n    ')
 }
 
-// The name of the method a click on this button should call — read by
+// The names of the methods this button's pointer events call — read by
 // generateScreenClass to build the deduplicated list of stub methods it
-// appends to the class (several buttons can share one callback name; the
-// stub is only generated once).
-function getCallbackName({ props }) {
-  return props.callback
+// appends to the class (several buttons can share a callback name; the
+// stub is only generated once). hoverCallback/hoverOutCallback are opt-in
+// and left out entirely when empty, so a button that doesn't use them
+// doesn't carry two unused TODO stubs.
+function getCallbackNames({ props }) {
+  return [props.callback, props.hoverCallback, props.hoverOutCallback].filter(Boolean)
 }
 
 function generateCallbackStub(name) {
@@ -151,6 +174,6 @@ export const buttonComponent = {
   create,
   generateCode,
   syncVisual,
-  getCallbackName,
+  getCallbackNames,
   generateCallbackStub,
 }

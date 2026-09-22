@@ -145,6 +145,14 @@ export function PropertiesPanel({
     onChange(id, { callback: event.target.value })
   }
 
+  const handleHoverCallbackChange = (event) => {
+    onChange(id, { hoverCallback: event.target.value })
+  }
+
+  const handleHoverOutCallbackChange = (event) => {
+    onChange(id, { hoverOutCallback: event.target.value })
+  }
+
   const handleCheckboxChange = (key) => (event) => {
     onChange(id, { [key]: event.target.checked })
   }
@@ -197,6 +205,30 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Callback (clic)</span>
           <input type="text" value={props.callback} onChange={handleCallbackChange} />
+        </div>
+      )}
+
+      {'hoverCallback' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Callback (survol)</span>
+          <input
+            type="text"
+            placeholder="(optionnel)"
+            value={props.hoverCallback}
+            onChange={handleHoverCallbackChange}
+          />
+        </div>
+      )}
+
+      {'hoverOutCallback' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Callback (fin survol)</span>
+          <input
+            type="text"
+            placeholder="(optionnel)"
+            value={props.hoverOutCallback}
+            onChange={handleHoverOutCallbackChange}
+          />
         </div>
       )}
 

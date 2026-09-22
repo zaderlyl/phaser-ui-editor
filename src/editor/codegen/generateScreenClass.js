@@ -52,21 +52,24 @@ function generateEntryCode(element, elements, indent) {
 }
 
 // One stub method per unique callback name across every element that
-// declares one (currently just Button, via getCallbackName/
-// generateCallbackStub) — several buttons can share a callback (e.g. two
-// "Retry" buttons), so the class gets one method for it, not a duplicate
-// per button that uses it. elements is the full flat list (top-level and
-// nested group children alike), so this needs no recursion.
+// declares any (currently just Button, via getCallbackNames/
+// generateCallbackStub — a button reports its click callback plus
+// whichever of its opt-in hover/hover-out callbacks are actually set).
+// Several buttons/callbacks can share a name (e.g. two "Retry" buttons),
+// so the class gets one method for it, not a duplicate per use. elements
+// is the full flat list (top-level and nested group children alike), so
+// this needs no recursion.
 function collectCallbackStubs(elements) {
   const seen = new Set()
   const stubs = []
   for (const element of elements) {
     const definition = componentLibrary.find((component) => component.type === element.type)
-    if (typeof definition?.getCallbackName !== 'function') continue
-    const name = definition.getCallbackName(element)
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    stubs.push(definition.generateCallbackStub(name))
+    if (typeof definition?.getCallbackNames !== 'function') continue
+    for (const name of definition.getCallbackNames(element)) {
+      if (!name || seen.has(name)) continue
+      seen.add(name)
+      stubs.push(definition.generateCallbackStub(name))
+    }
   }
   return stubs
 }
