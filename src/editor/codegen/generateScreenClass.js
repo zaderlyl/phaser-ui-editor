@@ -3,13 +3,27 @@ import { componentLibrary } from '../library/registry'
 // Builds the constructor line for one element by delegating to its
 // component's own generateCode(), the same way EditorScene.addElement()
 // delegates to create() — each component type owns both its live rendering
-// and its generated-code representation.
-function generateElementCode(element) {
+// and its generated-code representation. containerRef is the expression
+// ('this', or a group's 'this.<name>') an *async* component (currently
+// just Image) adds itself into once ready — see isAsyncComponent below.
+function generateElementCode(element, containerRef) {
   const definition = componentLibrary.find((component) => component.type === element.type)
   if (!definition || typeof definition.generateCode !== 'function') {
     throw new Error(`Component type "${element.type}" doesn't support code generation yet`)
   }
-  return definition.generateCode(element)
+  return definition.generateCode(element, containerRef)
+}
+
+// True for a component whose generateCode() doesn't produce a game object
+// synchronously (currently just Image — addBase64() decodes the picture
+// asynchronously, a real HTMLImageElement load under the hood). Such a
+// component adds *itself* into its container once ready, so callers here
+// must leave it out of the surrounding synchronous add([...]) list —
+// referencing `this.<name>` there before that callback has run would be
+// undefined.
+function isAsyncComponent(type) {
+  const definition = componentLibrary.find((component) => component.type === type)
+  return !!definition?.isAsync
 }
 
 // Groups aren't in the component library (they're not a placeable library
@@ -22,15 +36,20 @@ function generateElementCode(element) {
 // resizeSelected's group branch, the only place props.scaleX/Y is set).
 function generateGroupCode(element, elements, indent) {
   const { name, x, y, scaleX = 1, scaleY = 1 } = element.props
+  const containerRef = `this.${name}`
   const children = elements.filter((child) => child.parentId === element.id)
-  const childLines = children.map((child) => generateEntryCode(child, elements, indent))
-  const childRefs = children.map((child) => `this.${child.props.name}`)
+  const childLines = children.map((child) => generateEntryCode(child, elements, indent, containerRef))
+  // Async children (Image) add themselves into containerRef from their own
+  // callback once ready — see generateCode's containerRef param — so only
+  // the synchronous ones belong in this immediate add([...]) call.
+  const syncChildRefs = children
+    .filter((child) => !isAsyncComponent(child.type))
+    .map((child) => `this.${child.props.name}`)
 
-  const lines = [
-    `${indent}this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
-    ...childLines,
-    `${indent}this.${name}.add([${childRefs.join(', ')}]);`,
-  ]
+  const lines = [`${indent}this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`, ...childLines]
+  if (syncChildRefs.length > 0) {
+    lines.push(`${indent}this.${name}.add([${syncChildRefs.join(', ')}]);`)
+  }
   if (scaleX !== 1 || scaleY !== 1) {
     lines.push(`${indent}this.${name}.setScale(${formatScale(scaleX)}, ${formatScale(scaleY)});`)
   }
@@ -44,11 +63,11 @@ function formatScale(value) {
   return Number(value.toFixed(4))
 }
 
-function generateEntryCode(element, elements, indent) {
+function generateEntryCode(element, elements, indent, containerRef) {
   if (element.type === 'group') {
     return generateGroupCode(element, elements, indent)
   }
-  return `${indent}${generateElementCode(element)}`
+  return `${indent}${generateElementCode(element, containerRef)}`
 }
 
 // One stub method per unique callback name across every element that
@@ -78,16 +97,21 @@ function collectCallbackStubs(elements) {
 // EditorScene.elements) into a standalone Phaser.GameObjects.Container
 // subclass, matching the cahier des charges' export format: a constructor
 // that builds every named child (groups become nested Containers, see
-// generateGroupCode), adds them to the container in the same back-to-front
-// order (so Phaser's own paint order matches the editor's), a minimal
-// open()/close() API, and a stub method per button callback so the file
-// runs immediately instead of throwing on an undefined method the first
-// time someone clicks.
+// generateGroupCode; an Image adds itself in once its texture loads, see
+// isAsyncComponent), adds the synchronous ones to the container in the
+// same back-to-front order (so Phaser's own paint order matches the
+// editor's), a minimal open()/close() API, and a stub method per button
+// callback so the file runs immediately instead of throwing on an
+// undefined method the first time someone clicks.
 export function generateScreenClass(elements, className = 'Screen') {
   const topLevel = elements.filter((element) => !element.parentId)
-  const constructorLines = topLevel.map((element) => generateEntryCode(element, elements, '    '))
-  const childRefs = topLevel.map((element) => `this.${element.props.name}`)
-  const addChildrenLine = childRefs.length > 0 ? `    this.add([${childRefs.join(', ')}]);` : ''
+  const constructorLines = topLevel.map((element) =>
+    generateEntryCode(element, elements, '    ', 'this'),
+  )
+  const syncChildRefs = topLevel
+    .filter((element) => !isAsyncComponent(element.type))
+    .map((element) => `this.${element.props.name}`)
+  const addChildrenLine = syncChildRefs.length > 0 ? `    this.add([${syncChildRefs.join(', ')}]);` : ''
   const callbackStubs = collectCallbackStubs(elements)
   const callbackStubsBlock = callbackStubs.length > 0 ? `\n${callbackStubs.join('\n\n')}\n` : ''
 

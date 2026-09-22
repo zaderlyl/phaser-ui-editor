@@ -480,7 +480,7 @@ export class EditorScene extends Phaser.Scene {
     // A Button's background/label live on its Container as children, not
     // covered by the setSize() above (hit-area only) — resync them to the
     // just-restored world size (a no-op for every other type).
-    this.syncButtonVisual(child)
+    this.syncCompositeVisual(child)
   }
 
   // Removes a now-empty (or emptied-down-to-one-child, see ungroupSelected)
@@ -675,15 +675,17 @@ export class EditorScene extends Phaser.Scene {
     return true
   }
 
-  // Same idea as applyTextLayout, for Button: its gameObject is a
-  // Container (background rectangle + label text as children, see
-  // button.js), so none of the per-property Phaser calls above
-  // (setFillStyle, setStrokeStyle, setText, setSize as a *visual* resize)
-  // exist on it directly — this re-derives both children from props
-  // instead. Returns whether the element actually has one, same as
-  // applyTextLayout, for callers that need to know before falling back to
-  // a plain gameObject.setSize().
-  syncButtonVisual(element) {
+  // Same idea as applyTextLayout, for any composite Container-based
+  // component (Button, ProgressBar, ...): its gameObject is a Container
+  // (a background rectangle plus whatever else — a label, a fill bar —
+  // as children, see button.js/progressbar.js), so none of the
+  // per-property Phaser calls above (setFillStyle, setStrokeStyle,
+  // setText, setSize as a *visual* resize) exist on it directly — this
+  // re-derives its children from props instead, via the component's own
+  // syncVisual hook. Returns whether the element actually has one, same
+  // as applyTextLayout, for callers that need to know before falling back
+  // to a plain gameObject.setSize().
+  syncCompositeVisual(element) {
     const definition = componentLibrary.find((component) => component.type === element.type)
     if (typeof definition?.syncVisual !== 'function') return false
     definition.syncVisual(element.gameObject, element.props)
@@ -728,6 +730,39 @@ export class EditorScene extends Phaser.Scene {
     element.gameObject.setVisible(true)
   }
 
+  // The properties panel's "Changer l'image" button lives in a sibling
+  // React component with no direct access to the scene or a file picker —
+  // same situation as starttextedit's <textarea> overlay, so this follows
+  // the same pattern: just emit an event PhaserCanvas.jsx is listening for
+  // to open its (already-existing, from the initial-import flow) hidden
+  // file input, remembering *this* element's id so the eventual file
+  // ends up calling replaceImage() instead of creating a new element.
+  requestImageReplace(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'image') return
+    this.events.emit('requestimagereplace', { id })
+  }
+
+  // Swaps an existing image element's picture without touching its
+  // position or on-canvas size — setTexture() alone would reset the
+  // display size to the new picture's own native dimensions, so
+  // setDisplaySize() is reapplied right after with the size the element
+  // already had (the point of "replace", as opposed to placing a new
+  // image, is keeping the same frame and swapping what's inside it).
+  replaceImage(id, { textureKey, imageData }) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'image') return
+
+    element.gameObject.setTexture(textureKey)
+    element.gameObject.setDisplaySize(element.props.width, element.props.height)
+    element.props.textureKey = textureKey
+    element.props.imageData = imageData
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
   // Applies a partial props update (e.g. from the properties panel) to an
   // element's GameObject, keeping props and rendered state in sync in both
   // directions (canvas -> panel already covered by drag/resize handlers).
@@ -744,10 +779,15 @@ export class EditorScene extends Phaser.Scene {
     if ('width' in patch || 'height' in patch) {
       // A Rectangle's setSize() IS its visual size, but Text has its own
       // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
-      // only touches hit-area bookkeeping, not what's actually drawn.
+      // only touches hit-area bookkeeping, not what's actually drawn. An
+      // Image has no setSize() at all (its size is computed from the
+      // texture) — setDisplaySize() is the equivalent that actually
+      // stretches the rendered image.
       if (typeof gameObject.setFixedSize === 'function') {
         gameObject.setFixedSize(element.props.width, element.props.height)
         this.applyTextLayout(element)
+      } else if (typeof gameObject.setDisplaySize === 'function') {
+        gameObject.setDisplaySize(element.props.width, element.props.height)
       } else {
         gameObject.setSize(element.props.width, element.props.height)
       }
@@ -757,7 +797,7 @@ export class EditorScene extends Phaser.Scene {
       // PropertiesPanel), but a Rectangle and a Text take it differently —
       // a Rectangle's fill vs. Text's CSS-string style color. Neither
       // exists on a Button's Container, so this no-ops there and
-      // syncButtonVisual (below) handles its background fill instead.
+      // syncCompositeVisual (below) handles its background fill instead.
       if (typeof gameObject.setFillStyle === 'function') {
         gameObject.setFillStyle(element.props.color)
       } else if (typeof gameObject.setColor === 'function') {
@@ -788,7 +828,7 @@ export class EditorScene extends Phaser.Scene {
       // setStrokeStyle(width, numericColor) vs. Text's setStroke(cssColor,
       // width), argument order and color format both differ. Neither
       // exists on a Button's Container, so this no-ops there and
-      // syncButtonVisual (below) handles its background's border instead.
+      // syncCompositeVisual (below) handles its background's border instead.
       const { strokeColor, strokeThickness } = element.props
       if (typeof gameObject.setStrokeStyle === 'function') {
         gameObject.setStrokeStyle(strokeThickness, strokeColor)
@@ -799,19 +839,14 @@ export class EditorScene extends Phaser.Scene {
     if ('padding' in patch || 'verticalAlign' in patch) {
       this.applyTextLayout(element)
     }
-    if (
-      'width' in patch ||
-      'height' in patch ||
-      'color' in patch ||
-      'text' in patch ||
-      'strokeColor' in patch ||
-      'strokeThickness' in patch
-    ) {
-      // Button's Container has no direct API for any of these (see the
-      // no-ops noted above) — resync its background/label children from
-      // props instead. No-ops for every other type (syncButtonVisual
-      // returns false when the component has no syncVisual hook).
-      this.syncButtonVisual(element)
+    if (gameObject.type === 'Container') {
+      // A composite Container (Button, ProgressBar, ...) has no direct API
+      // for any of the per-property branches above (see the no-ops noted
+      // there) — resync all of its children from props instead, whatever
+      // changed. Unconditional rather than gated on a specific list of
+      // prop names, so a new composite's own props (e.g. ProgressBar's
+      // value) don't need this list updated too.
+      this.syncCompositeVisual(element)
     }
 
     this.drawSelection()
@@ -1016,16 +1051,17 @@ export class EditorScene extends Phaser.Scene {
         continue
       }
 
-      if (element.type === 'button') {
-        // Same reason as the group branch above: a Container's origin is
-        // always the fixed read-only 0.5, not a real per-element setting,
-        // so the generic `gameObject.originX` math below would misplace
-        // it — treat elLeft/elTop as the literal top-left directly instead
-        // (Button never keeps an ongoing origin concept past creation, see
-        // button.js's create()). Unlike a group, there's no scale/stretch
-        // here: the background rectangle and label are resized/repositioned
-        // for real via syncButtonVisual, same as a live properties-panel
-        // width/height edit does.
+      if (gameObject.type === 'Container') {
+        // Any other Container-based composite (Button, ProgressBar, ...):
+        // same reason as the group branch above, its origin is always the
+        // fixed read-only 0.5, not a real per-element setting, so the
+        // generic `gameObject.originX` math below would misplace it —
+        // treat elLeft/elTop as the literal top-left directly instead
+        // (none of these keep an ongoing origin concept past creation,
+        // see e.g. button.js's create()). Unlike a group, there's no
+        // scale/stretch here: the component's own children are resized/
+        // repositioned for real via syncCompositeVisual, same as a live
+        // properties-panel width/height edit does.
         gameObject.setSize(elWidth, elHeight)
         gameObject.x = elLeft
         gameObject.y = elTop
@@ -1033,22 +1069,26 @@ export class EditorScene extends Phaser.Scene {
         element.props.height = elHeight
         element.props.x = gameObject.x
         element.props.y = gameObject.y
-        this.syncButtonVisual(element)
+        this.syncCompositeVisual(element)
         continue
       }
 
       // Only touch size for element types that actually declare width/height
-      // in their props (a group and a button don't reach here — see the
-      // `continue`s above). A Rectangle's setSize() IS its visual size, but
-      // Text has its own fixed-size + word-wrap mechanism (see text.js) —
-      // setSize() on Text only touches hit-area bookkeeping, not what's
-      // actually drawn.
+      // in their props (a group and any Container-based composite don't
+      // reach here — see the `continue`s above). A Rectangle's setSize() IS
+      // its visual size, but Text has its own fixed-size + word-wrap
+      // mechanism (see text.js) — setSize() on Text only touches hit-area
+      // bookkeeping, not what's
+      // actually drawn. An Image has no setSize() at all — setDisplaySize()
+      // is what actually stretches the rendered image.
       if ('width' in element.props) {
         element.props.width = elWidth
         element.props.height = elHeight
         if (typeof gameObject.setFixedSize === 'function') {
           gameObject.setFixedSize(elWidth, elHeight)
           this.applyTextLayout(element)
+        } else if (typeof gameObject.setDisplaySize === 'function') {
+          gameObject.setDisplaySize(elWidth, elHeight)
         } else {
           gameObject.setSize(elWidth, elHeight)
         }
