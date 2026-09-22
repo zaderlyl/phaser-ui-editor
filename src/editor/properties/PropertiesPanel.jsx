@@ -633,6 +633,32 @@ export function PropertiesPanel({
         </div>
       )}
 
+      {'segments' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Segments</span>
+          <div className="properties-panel__row">
+            <label>
+              Nombre
+              <input
+                type="number"
+                min="0"
+                value={props.segments}
+                onChange={handleNumberChange('segments')}
+              />
+            </label>
+            <label>
+              Espacement
+              <input
+                type="number"
+                min="0"
+                value={props.segmentGap}
+                onChange={handleNumberChange('segmentGap')}
+              />
+            </label>
+          </div>
+        </div>
+      )}
+
       {'hoverColor' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Couleur (survol)</span>

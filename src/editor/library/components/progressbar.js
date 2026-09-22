@@ -61,6 +61,16 @@ const defaultProps = {
   labelFormat: 'percent',
   labelColor: 0xffffff,
   labelFontSize: 14,
+  // 0 or 1 means a continuous fill, as before this prop existed — 2+
+  // splits the fill area into that many equal blocks (a "life pips" look,
+  // à la Zelda) instead, each one either fully lit or not — no partial
+  // fill within a block. Segmented mode keeps it simple for now: a flat
+  // activeFillColor per lit block (no gradient — a gradient's "natural
+  // reading direction across the whole bar" doesn't map cleanly onto
+  // separate blocks) and no per-block corner rounding (only the track
+  // itself still respects cornerRadius).
+  segments: 0,
+  segmentGap: 4,
   originX: 0,
   originY: 0,
 }
@@ -126,6 +136,42 @@ function fillCornerRadius(cornerRadius, geo, orientation, direction) {
   return direction === 'reversed' ? { ...zero, tr: radius, br: radius } : { ...zero, tl: radius, bl: radius }
 }
 
+// One rect per segment, in *value order* (index 0 is the first to light
+// up, i.e. the one on the anchored edge — see fillGeometry's identical
+// anchor convention), each innerWidth/innerHeight-sized on the
+// cross-axis and evenly sized/spaced along the growth axis within the
+// padded area. Physical (left-to-right / top-to-bottom) position is
+// computed first, then reversed for value order when direction is
+// 'reversed' (whose anchor is the opposite edge).
+function segmentRects(width, height, orientation, direction, padding, segments, segmentGap) {
+  const innerWidth = Math.max(0, width - padding * 2)
+  const innerHeight = Math.max(0, height - padding * 2)
+  const count = Math.max(2, Math.round(segments))
+  const gapTotal = segmentGap * (count - 1)
+
+  if (orientation === 'vertical') {
+    const segH = Math.max(0, (innerHeight - gapTotal) / count)
+    const physical = Array.from({ length: count }, (_, i) => ({
+      x: padding,
+      y: padding + i * (segH + segmentGap),
+      width: innerWidth,
+      height: segH,
+    }))
+    // Physical order is top-to-bottom; 'normal' fills bottom-to-top, so
+    // the bottom-most (last physical) rect is first in value order.
+    return direction === 'reversed' ? physical : physical.slice().reverse()
+  }
+
+  const segW = Math.max(0, (innerWidth - gapTotal) / count)
+  const physical = Array.from({ length: count }, (_, i) => ({
+    x: padding + i * (segW + segmentGap),
+    y: padding,
+    width: segW,
+    height: innerHeight,
+  }))
+  return direction === 'reversed' ? physical.slice().reverse() : physical
+}
+
 // "60%" for labelFormat 'percent', "60/100" (the raw value and maxValue,
 // unadjusted for minValue — the common case is minValue 0 anyway) for
 // 'value'.
@@ -189,6 +235,37 @@ function drawFill(graphics, geo, colorStart, colorEnd, orientation, direction, c
   }
 }
 
+// Segmented mode: as many of the (value-ordered, see segmentRects) blocks
+// as `ratio` covers are drawn solid in activeColor; the rest are left
+// undrawn, so the track shows through them and through the gaps between
+// blocks exactly as if they'd been drawn in backgroundColor. No gradient,
+// no per-block rounding — see the defaultProps note on why.
+function drawSegmentedFill(graphics, width, height, orientation, direction, padding, segments, segmentGap, ratio, activeColor) {
+  graphics.clear()
+  const rects = segmentRects(width, height, orientation, direction, padding, segments, segmentGap)
+  const litCount = Math.round(ratio * rects.length)
+
+  graphics.fillStyle(activeColor, 1)
+  for (let i = 0; i < litCount; i += 1) {
+    const rect = rects[i]
+    if (rect.width > 0 && rect.height > 0) graphics.fillRect(rect.x, rect.y, rect.width, rect.height)
+  }
+}
+
+// Dispatches to the continuous or segmented renderer depending on
+// segments — shared by create() and syncVisual() so both always agree on
+// which mode is active.
+function renderFill(fill, props, ratio, activeColor) {
+  const { width, height, orientation, direction, padding, cornerRadius, fillGradientEnd, segments, segmentGap } =
+    props
+  if (segments > 1) {
+    drawSegmentedFill(fill, width, height, orientation, direction, padding, segments, segmentGap, ratio, activeColor)
+    return
+  }
+  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
+  drawFill(fill, geo, activeColor, fillGradientEnd, orientation, direction, cornerRadius)
+}
+
 function create(scene, props) {
   const {
     x,
@@ -197,17 +274,13 @@ function create(scene, props) {
     height,
     backgroundColor,
     fillColor,
-    fillGradientEnd,
     fillColorLow,
     lowThreshold,
     value,
     minValue,
     maxValue,
-    orientation,
-    direction,
     strokeColor,
     strokeThickness,
-    padding,
     cornerRadius,
     showLabel,
     labelFormat,
@@ -235,9 +308,8 @@ function create(scene, props) {
 
   const fill = scene.add.graphics()
   const ratio = fillRatio(value, minValue, maxValue)
-  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  drawFill(fill, geo, activeColor, fillGradientEnd, orientation, direction, cornerRadius)
+  renderFill(fill, props, ratio, activeColor)
 
   const label = scene.add
     .text(width / 2, height / 2, labelText(value, maxValue, ratio, labelFormat), {
@@ -275,26 +347,22 @@ function create(scene, props) {
 // after any change to width/height/backgroundColor/fillColor/
 // fillGradientEnd/fillColorLow/lowThreshold/value/minValue/maxValue/
 // orientation/direction/strokeColor/strokeThickness/padding/cornerRadius/
-// showLabel/labelFormat/labelColor/labelFontSize, since none of those
-// live on the Container itself (see EditorScene's syncCompositeVisual,
-// the only caller).
+// segments/segmentGap/showLabel/labelFormat/labelColor/labelFontSize,
+// since none of those live on the Container itself (see EditorScene's
+// syncCompositeVisual, the only caller).
 function syncVisual(container, props) {
   const {
     width,
     height,
     backgroundColor,
     fillColor,
-    fillGradientEnd,
     fillColorLow,
     lowThreshold,
     value,
     minValue,
     maxValue,
-    orientation,
-    direction,
     strokeColor,
     strokeThickness,
-    padding,
     cornerRadius,
     showLabel,
     labelFormat,
@@ -311,9 +379,8 @@ function syncVisual(container, props) {
   drawBackground(background, width, height, backgroundColor, strokeColor, strokeThickness, cornerRadius)
 
   const ratio = fillRatio(value, minValue, maxValue)
-  const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
-  drawFill(fill, geo, activeColor, fillGradientEnd, orientation, direction, cornerRadius)
+  renderFill(fill, props, ratio, activeColor)
 
   label
     .setText(labelText(value, maxValue, ratio, labelFormat))
