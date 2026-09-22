@@ -154,6 +154,14 @@ export function PropertiesPanel({
     onChange(id, { fillGradientEnd: hexToColorNumber(event.target.value) })
   }
 
+  const handleLabelColorChange = (event) => {
+    onChange(id, { labelColor: hexToColorNumber(event.target.value) })
+  }
+
+  const handleLabelFormatChange = (value) => () => {
+    onChange(id, { labelFormat: value })
+  }
+
   const handleTextChange = (event) => {
     onChange(id, { text: event.target.value })
   }
@@ -450,6 +458,64 @@ export function PropertiesPanel({
               />
             </label>
           </div>
+        </div>
+      )}
+
+      {'showLabel' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Texte</span>
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.showLabel}
+              onChange={handleCheckboxChange('showLabel')}
+            />
+            Afficher un texte sur la barre
+          </label>
+        </div>
+      )}
+
+      {'labelFormat' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Format du texte</span>
+          <div className="properties-panel__row">
+            {[
+              { value: 'percent', label: 'Pourcentage' },
+              { value: 'value', label: 'Valeur' },
+            ].map(({ value, label }) => (
+              <button
+                key={value}
+                type="button"
+                onClick={handleLabelFormatChange(value)}
+                className={props.labelFormat === value ? 'properties-panel__row-button--active' : ''}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {'labelColor' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Couleur du texte</span>
+          <input
+            type="color"
+            value={colorNumberToHex(props.labelColor)}
+            onChange={handleLabelColorChange}
+          />
+        </div>
+      )}
+
+      {'labelFontSize' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Taille du texte</span>
+          <input
+            type="number"
+            min="1"
+            value={props.labelFontSize}
+            onChange={handleNumberChange('labelFontSize')}
+          />
         </div>
       )}
 

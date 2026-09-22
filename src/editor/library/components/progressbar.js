@@ -46,6 +46,16 @@ const defaultProps = {
   // "Padding" field for free. 0 means the fill is flush against the
   // track's edges, as before this prop existed.
   padding: 0,
+  // A text overlay centered on the bar (e.g. "60%" or "60/100") — hidden
+  // by default (opt-in, like the rest of these knobs), distinct prop
+  // names (labelColor/labelFontSize) rather than reusing the generic
+  // color/fontSize prop names Text/Button already use, since "Couleur"
+  // would otherwise read as controlling the bar's own colors, not the
+  // label's — worth the extra properties-panel fields for the clarity.
+  showLabel: false,
+  labelFormat: 'percent',
+  labelColor: 0xffffff,
+  labelFontSize: 14,
   originX: 0,
   originY: 0,
 }
@@ -94,6 +104,19 @@ function fillGeometry(width, height, ratio, orientation, direction, padding) {
     : { x: padding, y: padding, width: fillWidth, height: innerHeight }
 }
 
+// "60%" for labelFormat 'percent', "60/100" (the raw value and maxValue,
+// unadjusted for minValue — the common case is minValue 0 anyway) for
+// 'value'.
+function labelText(value, maxValue, ratio, labelFormat) {
+  return labelFormat === 'value'
+    ? `${Math.round(value)}/${Math.round(maxValue)}`
+    : `${Math.round(ratio * 100)}%`
+}
+
+function labelColorHex(labelColor) {
+  return `#${labelColor.toString(16).padStart(6, '0')}`
+}
+
 // Draws the fill as a Graphics rect rather than a plain Rectangle, since a
 // two-stop gradient (fillGradientStyle) is WebGL-only and has no Shape/
 // Rectangle equivalent in Phaser — Graphics is the only game object that
@@ -134,6 +157,10 @@ function create(scene, props) {
     strokeColor,
     strokeThickness,
     padding,
+    showLabel,
+    labelFormat,
+    labelColor,
+    labelFontSize,
     originX,
     originY,
   } = props
@@ -148,6 +175,14 @@ function create(scene, props) {
   const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
   drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
+
+  const label = scene.add
+    .text(width / 2, height / 2, labelText(value, maxValue, ratio, labelFormat), {
+      fontSize: `${labelFontSize}px`,
+      color: labelColorHex(labelColor),
+    })
+    .setOrigin(0.5, 0.5)
+    .setVisible(showLabel)
 
   // A Container has no real origin support (Phaser's Container.originX/Y
   // is a fixed read-only 0.5 that doesn't affect positioning — see
@@ -164,17 +199,19 @@ function create(scene, props) {
   props.x = left
   props.y = top
 
-  const container = scene.add.container(left, top, [background, fill])
+  const container = scene.add.container(left, top, [background, fill, label])
   container.setSize(width, height)
   container.setData('background', background)
   container.setData('fill', fill)
+  container.setData('label', label)
   return container
 }
 
-// Resyncs the background and fill to the current props — needed after any
-// change to width/height/backgroundColor/fillColor/fillGradientEnd/
-// fillColorLow/lowThreshold/value/minValue/maxValue/orientation/direction/
-// strokeColor/strokeThickness/padding, since none of those live on the
+// Resyncs the background, fill and label to the current props — needed
+// after any change to width/height/backgroundColor/fillColor/
+// fillGradientEnd/fillColorLow/lowThreshold/value/minValue/maxValue/
+// orientation/direction/strokeColor/strokeThickness/padding/showLabel/
+// labelFormat/labelColor/labelFontSize, since none of those live on the
 // Container itself (see EditorScene's syncCompositeVisual, the only
 // caller).
 function syncVisual(container, props) {
@@ -194,9 +231,14 @@ function syncVisual(container, props) {
     strokeColor,
     strokeThickness,
     padding,
+    showLabel,
+    labelFormat,
+    labelColor,
+    labelFontSize,
   } = props
   const background = container.getData('background')
   const fill = container.getData('fill')
+  const label = container.getData('label')
 
   background.setSize(width, height)
   background.setFillStyle(backgroundColor)
@@ -206,6 +248,13 @@ function syncVisual(container, props) {
   const geo = fillGeometry(width, height, ratio, orientation, direction, padding)
   const activeColor = activeFillColor(ratio, fillColor, fillColorLow, lowThreshold)
   drawFill(fill, geo, activeColor, fillGradientEnd, orientation)
+
+  label
+    .setText(labelText(value, maxValue, ratio, labelFormat))
+    .setFontSize(labelFontSize)
+    .setColor(labelColorHex(labelColor))
+    .setPosition(width / 2, height / 2)
+    .setVisible(showLabel)
 }
 
 export const progressBarComponent = {
