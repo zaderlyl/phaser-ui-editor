@@ -65,6 +65,10 @@ function App() {
     sceneRef.current?.requestProgressBarIcon(id, slot)
   }, [])
 
+  const handleSetImageButtonTexture = useCallback((id, slot) => {
+    sceneRef.current?.requestImageButtonTexture(id, slot)
+  }, [])
+
   // Live position/size/name updates from a single-element drag, resize or
   // rename (see EditorScene's 'elementchange') only ever concern the one
   // element currently selected, so just refresh it in place.
@@ -110,6 +114,7 @@ function App() {
           onUngroup={handleUngroup}
           onReplaceImage={handleReplaceImage}
           onSetProgressBarIcon={handleSetProgressBarIcon}
+          onSetImageButtonTexture={handleSetImageButtonTexture}
         />
       </div>
 

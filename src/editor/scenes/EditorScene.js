@@ -835,6 +835,32 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('elementsChange', this.getElementsSnapshot())
   }
 
+  // Same event-delegation pattern as requestImageReplace/
+  // requestProgressBarIcon, for Bouton image's "Choisir l'image (survol/
+  // appui)" buttons — slot is 'hover' or 'pressed', matching the
+  // hoverTextureKey/pressedTextureKey prop names (see imagebutton.js).
+  requestImageButtonTexture(id, slot) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'imagebutton') return
+    this.events.emit('requestimagebuttontexture', { id, slot })
+  }
+
+  // Sets one of Bouton image's optional alternate textures. Unlike
+  // ProgressBar's icon slots, this needs no live visual sync at all — the
+  // editor canvas never shows a hover/pressed state (a click or hover
+  // there only ever means select/drag/resize), only the exported code's
+  // real pointerover/pointerdown listeners do.
+  setImageButtonTexture(id, slot, { textureKey, imageData }) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'imagebutton') return
+
+    element.props[`${slot}TextureKey`] = textureKey
+    element.props[`${slot}ImageData`] = imageData
+
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
   // Applies a partial props update (e.g. from the properties panel) to an
   // element's GameObject, keeping props and rendered state in sync in both
   // directions (canvas -> panel already covered by drag/resize handlers).

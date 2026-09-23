@@ -22,6 +22,13 @@ const defaultProps = {
   // canvas itself never fires it (a click there always means select/
   // drag), only the exported code's real pointerup listener does.
   callback: 'onImageButtonClick',
+  // An optional alternate texture shown on pointerover, swapped back on
+  // pointerout — empty key means no hover state (opt-in, like every
+  // advanced Bouton/ProgressBar knob). Only ever matters in the exported
+  // code, same reason as callback above: the editor canvas never
+  // simulates hover.
+  hoverTextureKey: '',
+  hoverImageData: '',
   originX: 0,
   originY: 0,
 }
@@ -49,17 +56,44 @@ function escapeForLiteral(value) {
 // pointer is still hit-testing that object, so pressing on the button and
 // dragging off before releasing does not fire the callback — the
 // standard tap-to-cancel affordance.
+//
+// The optional hover texture's own addBase64/once is nested *inside* the
+// normal texture's callback (rather than alongside it) so this.<name>
+// definitely exists — and so pointerover/pointerout definitely have
+// something to attach to — before that second decode can possibly
+// resolve, regardless of which of the two images happens to finish
+// decoding first. Each swap reapplies setDisplaySize(): setTexture()
+// alone resets display size to the new texture's own native dimensions
+// (the same gotcha replaceImage/ProgressBar's icon slots already handle),
+// which would make the button visibly change size on hover if the two
+// pictures don't happen to share a resolution.
 function generateCode(element, containerRef = 'this') {
-  const { name, x, y, width, height, textureKey, imageData, originX, originY, callback } = element.props
-  return [
+  const { name, x, y, width, height, textureKey, imageData, hoverTextureKey, hoverImageData, originX, originY, callback } =
+    element.props
+  const w = Math.round(width)
+  const h = Math.round(height)
+
+  const lines = [
     `scene.textures.addBase64('${textureKey}', '${escapeForLiteral(imageData)}');`,
     `scene.textures.once('addtexture-${textureKey}', () => {`,
-    `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${Math.round(width)}, ${Math.round(height)}).setOrigin(${originX}, ${originY});`,
+    `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${w}, ${h}).setOrigin(${originX}, ${originY});`,
     `  this.${name}.setInteractive({ useHandCursor: true });`,
     `  this.${name}.on('pointerup', () => this.${callback}());`,
-    `  ${containerRef}.add(this.${name});`,
-    `});`,
-  ].join('\n    ')
+  ]
+
+  if (hoverTextureKey) {
+    lines.push(
+      `  scene.textures.addBase64('${hoverTextureKey}', '${escapeForLiteral(hoverImageData)}');`,
+      `  scene.textures.once('addtexture-${hoverTextureKey}', () => {`,
+      `    this.${name}.on('pointerover', () => this.${name}.setTexture('${hoverTextureKey}').setDisplaySize(${w}, ${h}));`,
+      `    this.${name}.on('pointerout', () => this.${name}.setTexture('${textureKey}').setDisplaySize(${w}, ${h}));`,
+      `  });`,
+    )
+  }
+
+  lines.push(`  ${containerRef}.add(this.${name});`, `});`)
+
+  return lines.join('\n    ')
 }
 
 // Read by generateScreenClass to build the deduplicated list of stub

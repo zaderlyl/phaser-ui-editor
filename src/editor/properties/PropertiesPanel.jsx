@@ -28,6 +28,7 @@ export function PropertiesPanel({
   onUngroup,
   onReplaceImage,
   onSetProgressBarIcon,
+  onSetImageButtonTexture,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -741,6 +742,15 @@ export function PropertiesPanel({
               />
             </label>
           </div>
+        </div>
+      )}
+
+      {'hoverTextureKey' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Image (survol)</span>
+          <button type="button" onClick={() => onSetImageButtonTexture(id, 'hover')}>
+            {props.hoverTextureKey ? "Changer l'image (survol)" : "Choisir l'image (survol)"}
+          </button>
         </div>
       )}
 
