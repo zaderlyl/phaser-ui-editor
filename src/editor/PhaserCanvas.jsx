@@ -20,10 +20,10 @@ export function PhaserCanvas({
   const gameRef = useRef(null)
   const sceneRef = useRef(null)
   const fileInputRef = useRef(null)
-  // Where to place the image once a file is actually chosen — Image has
-  // no sensible default content, so unlike every other component, its
-  // drop doesn't call addElement() directly (see handleDrop/
-  // handleImageFileChange below).
+  // { x, y, type } for where to place an image-based element once a file
+  // is actually chosen — Image and Bouton image have no sensible default
+  // content, so unlike every other component, their drop doesn't call
+  // addElement() directly (see handleDrop/handleImageFileChange below).
   const pendingImageDropRef = useRef(null)
   // The id of an existing image element to replace instead of placing a
   // new one, set by the 'requestimagereplace' listener below (see the
@@ -132,12 +132,12 @@ export function PhaserCanvas({
     const x = (event.clientX - rect.left) * scaleX
     const y = (event.clientY - rect.top) * scaleY
 
-    if (type === 'image') {
+    if (type === 'image' || type === 'imagebutton') {
       // No sensible default content to place immediately — remember
-      // where the drop happened and ask for a file instead; the element
-      // is only created once handleImageFileChange's texture actually
-      // finishes loading.
-      pendingImageDropRef.current = { x, y }
+      // where the drop happened (and which of the two this is) and ask
+      // for a file instead; the element is only created once
+      // handleImageFileChange's texture actually finishes loading.
+      pendingImageDropRef.current = { x, y, type }
       fileInputRef.current?.click()
       return
     }
@@ -196,7 +196,7 @@ export function PhaserCanvas({
         const width = Math.round(source.width * scale)
         const height = Math.round(source.height * scale)
 
-        const element = scene.addElement('image', {
+        const element = scene.addElement(drop.type, {
           x: drop.x,
           y: drop.y,
           width,
