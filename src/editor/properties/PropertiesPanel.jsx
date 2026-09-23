@@ -754,6 +754,15 @@ export function PropertiesPanel({
         </div>
       )}
 
+      {'pressedTextureKey' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Image (appui)</span>
+          <button type="button" onClick={() => onSetImageButtonTexture(id, 'pressed')}>
+            {props.pressedTextureKey ? "Changer l'image (appui)" : "Choisir l'image (appui)"}
+          </button>
+        </div>
+      )}
+
       {'hoverColor' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Couleur (survol)</span>

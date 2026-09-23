@@ -1,5 +1,5 @@
-// Bouton image: an imported picture that behaves like a button — hover/
-// pressed alternate textures come in later steps. Unlike Bouton (a
+// Bouton image: an imported picture that behaves like a button, with
+// optional hover/pressed alternate textures. Unlike Bouton (a
 // Container with a background rectangle + label, since a Shape can't
 // also hold text), the image itself IS the whole visual here, so this is
 // just a single Phaser.GameObjects.Image, sized/positioned exactly like
@@ -29,6 +29,10 @@ const defaultProps = {
   // simulates hover.
   hoverTextureKey: '',
   hoverImageData: '',
+  // An optional alternate texture shown on pointerdown, swapped away on
+  // pointerup — same opt-in/export-only rule as hoverTextureKey.
+  pressedTextureKey: '',
+  pressedImageData: '',
   originX: 0,
   originY: 0,
 }
@@ -57,28 +61,51 @@ function escapeForLiteral(value) {
 // dragging off before releasing does not fire the callback — the
 // standard tap-to-cancel affordance.
 //
-// The optional hover texture's own addBase64/once is nested *inside* the
-// normal texture's callback (rather than alongside it) so this.<name>
-// definitely exists — and so pointerover/pointerout definitely have
-// something to attach to — before that second decode can possibly
-// resolve, regardless of which of the two images happens to finish
-// decoding first. Each swap reapplies setDisplaySize(): setTexture()
-// alone resets display size to the new texture's own native dimensions
-// (the same gotcha replaceImage/ProgressBar's icon slots already handle),
-// which would make the button visibly change size on hover if the two
+// The optional hover/pressed textures' own addBase64/once are each
+// nested *inside* the normal texture's callback (rather than alongside
+// it) so this.<name> definitely exists — and so pointerover/pointerout/
+// pointerdown definitely have something to attach to — before either
+// decode can possibly resolve, regardless of decode order; hover and
+// pressed are independent of each other, so neither is nested inside the
+// other. Each swap reapplies setDisplaySize(): setTexture() alone resets
+// display size to the new texture's own native dimensions (the same
+// gotcha replaceImage/ProgressBar's icon slots already handle), which
+// would make the button visibly change size on hover/press if the
 // pictures don't happen to share a resolution.
+//
+// pointerup reverts to the *hover* texture rather than straight to
+// normal (falling back to normal if there's no hover texture) before
+// firing the callback — same reasoning as Bouton's own color revert:
+// releasing while the pointer is still over the button should leave it
+// looking hovered, not suddenly idle. Harmless no-op when neither hover
+// nor pressed is configured (it just re-sets the texture already showing).
 function generateCode(element, containerRef = 'this') {
-  const { name, x, y, width, height, textureKey, imageData, hoverTextureKey, hoverImageData, originX, originY, callback } =
-    element.props
+  const {
+    name,
+    x,
+    y,
+    width,
+    height,
+    textureKey,
+    imageData,
+    hoverTextureKey,
+    hoverImageData,
+    pressedTextureKey,
+    pressedImageData,
+    originX,
+    originY,
+    callback,
+  } = element.props
   const w = Math.round(width)
   const h = Math.round(height)
+  const restingTextureKey = hoverTextureKey || textureKey
 
   const lines = [
     `scene.textures.addBase64('${textureKey}', '${escapeForLiteral(imageData)}');`,
     `scene.textures.once('addtexture-${textureKey}', () => {`,
     `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${w}, ${h}).setOrigin(${originX}, ${originY});`,
     `  this.${name}.setInteractive({ useHandCursor: true });`,
-    `  this.${name}.on('pointerup', () => this.${callback}());`,
+    `  this.${name}.on('pointerup', () => { this.${name}.setTexture('${restingTextureKey}').setDisplaySize(${w}, ${h}); this.${callback}(); });`,
   ]
 
   if (hoverTextureKey) {
@@ -87,6 +114,15 @@ function generateCode(element, containerRef = 'this') {
       `  scene.textures.once('addtexture-${hoverTextureKey}', () => {`,
       `    this.${name}.on('pointerover', () => this.${name}.setTexture('${hoverTextureKey}').setDisplaySize(${w}, ${h}));`,
       `    this.${name}.on('pointerout', () => this.${name}.setTexture('${textureKey}').setDisplaySize(${w}, ${h}));`,
+      `  });`,
+    )
+  }
+
+  if (pressedTextureKey) {
+    lines.push(
+      `  scene.textures.addBase64('${pressedTextureKey}', '${escapeForLiteral(pressedImageData)}');`,
+      `  scene.textures.once('addtexture-${pressedTextureKey}', () => {`,
+      `    this.${name}.on('pointerdown', () => this.${name}.setTexture('${pressedTextureKey}').setDisplaySize(${w}, ${h}));`,
       `  });`,
     )
   }
