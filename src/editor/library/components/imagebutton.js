@@ -33,6 +33,13 @@ const defaultProps = {
   // pointerup — same opt-in/export-only rule as hoverTextureKey.
   pressedTextureKey: '',
   pressedImageData: '',
+  // Unlike hoverTextureKey, these fire independently of whether a hover
+  // texture is even set — a créa might want a hover sound or tooltip with
+  // no visual texture swap at all. Empty means "no extra call, no stub
+  // generated for it", same convention as Bouton's own opt-in hover
+  // callbacks.
+  hoverCallback: '',
+  hoverOutCallback: '',
   originX: 0,
   originY: 0,
 }
@@ -79,6 +86,15 @@ function escapeForLiteral(value) {
 // releasing while the pointer is still over the button should leave it
 // looking hovered, not suddenly idle. Harmless no-op when neither hover
 // nor pressed is configured (it just re-sets the texture already showing).
+//
+// hoverCallback/hoverOutCallback fire independently of hoverTextureKey —
+// a créa might want a hover sound with no visual swap at all — so
+// pointerover/pointerout get wired whenever *either* the texture or the
+// callback is set, combining both concerns in one listener when both are
+// present. Only the texture swap needs to wait on an async decode
+// (there's nothing to wait for to just call a callback), so a
+// callback-only listener is added directly rather than nested in the
+// hover texture's own addBase64/once block.
 function generateCode(element, containerRef = 'this') {
   const {
     name,
@@ -95,6 +111,8 @@ function generateCode(element, containerRef = 'this') {
     originX,
     originY,
     callback,
+    hoverCallback,
+    hoverOutCallback,
   } = element.props
   const w = Math.round(width)
   const h = Math.round(height)
@@ -109,13 +127,18 @@ function generateCode(element, containerRef = 'this') {
   ]
 
   if (hoverTextureKey) {
+    const overCall = hoverCallback ? ` this.${hoverCallback}();` : ''
+    const outCall = hoverOutCallback ? ` this.${hoverOutCallback}();` : ''
     lines.push(
       `  scene.textures.addBase64('${hoverTextureKey}', '${escapeForLiteral(hoverImageData)}');`,
       `  scene.textures.once('addtexture-${hoverTextureKey}', () => {`,
-      `    this.${name}.on('pointerover', () => this.${name}.setTexture('${hoverTextureKey}').setDisplaySize(${w}, ${h}));`,
-      `    this.${name}.on('pointerout', () => this.${name}.setTexture('${textureKey}').setDisplaySize(${w}, ${h}));`,
+      `    this.${name}.on('pointerover', () => { this.${name}.setTexture('${hoverTextureKey}').setDisplaySize(${w}, ${h});${overCall} });`,
+      `    this.${name}.on('pointerout', () => { this.${name}.setTexture('${textureKey}').setDisplaySize(${w}, ${h});${outCall} });`,
       `  });`,
     )
+  } else {
+    if (hoverCallback) lines.push(`  this.${name}.on('pointerover', () => this.${hoverCallback}());`)
+    if (hoverOutCallback) lines.push(`  this.${name}.on('pointerout', () => this.${hoverOutCallback}());`)
   }
 
   if (pressedTextureKey) {
@@ -137,7 +160,7 @@ function generateCode(element, containerRef = 'this') {
 // several image buttons can share a callback name without generating a
 // duplicate stub.
 function getCallbackNames({ props }) {
-  return [props.callback].filter(Boolean)
+  return [props.callback, props.hoverCallback, props.hoverOutCallback].filter(Boolean)
 }
 
 function generateCallbackStub(name) {
