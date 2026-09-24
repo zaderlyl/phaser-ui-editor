@@ -68,6 +68,10 @@ function App() {
     sceneRef.current?.groupSelected()
   }, [])
 
+  const handleDuplicate = useCallback(() => {
+    sceneRef.current?.duplicateSelected()
+  }, [])
+
   const handleUngroup = useCallback(() => {
     sceneRef.current?.ungroupSelected()
   }, [])
@@ -184,6 +188,7 @@ function App() {
           onRename={handleRename}
           onDelete={handleDelete}
           onDeleteSelected={handleDeleteSelected}
+          onDuplicate={handleDuplicate}
           onAlign={handleAlign}
           onGroup={handleGroup}
           onUngroup={handleUngroup}

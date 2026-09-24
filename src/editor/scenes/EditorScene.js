@@ -554,6 +554,18 @@ export class EditorScene extends Phaser.Scene {
       event.preventDefault()
       this.redo()
     })
+
+    // Cmd+D (Mac) / Ctrl+D (Windows/Linux) duplicates the selection.
+    // Browsers default Ctrl/Cmd+D to bookmarking the page — preventDefault
+    // stops that.
+    this.input.keyboard.on('keydown-D', (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!(event.ctrlKey || event.metaKey)) return
+
+      event.preventDefault()
+      this.duplicateSelected()
+    })
   }
 
   // setInteractive({ useHandCursor: true }) with no explicit hitArea makes
@@ -586,8 +598,16 @@ export class EditorScene extends Phaser.Scene {
     }
   }
 
-  // Instantiates a real Phaser GameObject for the given library component type
-  // and tracks it as an element of the current screen.
+  // panel1, panel2, ... — shared by addElement and duplicateSelected, so a
+  // duplicate never collides with an existing name the way copying the
+  // original's own name verbatim would.
+  generateDefaultName(type) {
+    this.typeCounters[type] = (this.typeCounters[type] ?? 0) + 1
+    return `${type}${this.typeCounters[type]}`
+  }
+
+  // Instantiates a real Phaser GameObject for the given library component
+  // type and tracks it as an element of the current screen.
   addElement(type, props = {}) {
     const definition = componentLibrary.find((component) => component.type === type)
     if (!definition) {
@@ -597,9 +617,7 @@ export class EditorScene extends Phaser.Scene {
     // Resolve against the component's defaults so element.props always holds
     // the full, current set of fields (needed by e.g. the properties panel).
     // A default name (panel1, panel2, ...) is assigned unless one was given.
-    this.typeCounters[type] = (this.typeCounters[type] ?? 0) + 1
-    const defaultName = `${type}${this.typeCounters[type]}`
-    const resolvedProps = { ...definition.defaultProps, name: defaultName, ...props }
+    const resolvedProps = { ...definition.defaultProps, name: this.generateDefaultName(type), ...props }
     const gameObject = definition.create(this, resolvedProps)
     const id = crypto.randomUUID()
     gameObject.setData('elementId', id)
@@ -669,6 +687,83 @@ export class EditorScene extends Phaser.Scene {
       if (this.removeElementInternal(id)) removedAny = true
     }
     if (removedAny) this.commitHistory()
+  }
+
+  // Every element whose parentId chain eventually leads back to rootId,
+  // rootId itself included — a group's or Bouton composé's full subtree,
+  // in no particular order. Used by duplicateSelected to know exactly
+  // which elements need a fresh id when copying one.
+  collectSubtreeIds(rootId) {
+    const ids = [rootId]
+    const stack = [rootId]
+    while (stack.length > 0) {
+      const id = stack.pop()
+      for (const element of this.elements) {
+        if (element.parentId === id) {
+          ids.push(element.id)
+          stack.push(element.id)
+        }
+      }
+    }
+    return ids
+  }
+
+  // Cmd/Ctrl+D — copies one top-level element/group/Bouton composé
+  // (including its full subtree) to a fresh set of ids, offset by
+  // (offsetX, offsetY) from the original, and builds it via the same
+  // buildElementFromEntry restoreSnapshot uses. Every id inside the
+  // subtree gets its own new id (not just the root) so a duplicated
+  // group's children aren't secretly aliases of the originals — dragging
+  // one copy would otherwise move the other's children too, since
+  // they'd be the very same elements. A Bouton composé's own
+  // normalChildId/hoverChildId/pressedChildId reference other elements
+  // *within this same subtree* by id, so those get remapped too, the
+  // same way parentId is — otherwise the copy's roles would still point
+  // at the original's children instead of its own.
+  duplicateSubtree(root, offsetX, offsetY) {
+    const subtreeIds = this.collectSubtreeIds(root.id)
+    const idMap = new Map(subtreeIds.map((id) => [id, crypto.randomUUID()]))
+
+    const entries = subtreeIds.map((id) => {
+      const original = this.elements.find((element) => element.id === id)
+      const props = { ...original.props, name: this.generateDefaultName(original.type) }
+      for (const key of ['normalChildId', 'hoverChildId', 'pressedChildId']) {
+        if (key in props && props[key]) props[key] = idMap.get(props[key]) ?? null
+      }
+      if (id === root.id) {
+        props.x = original.props.x + offsetX
+        props.y = original.props.y + offsetY
+      }
+      return {
+        id: idMap.get(id),
+        type: original.type,
+        parentId: original.parentId ? (idMap.get(original.parentId) ?? null) : null,
+        props,
+      }
+    })
+
+    const childrenByParent = this.groupEntriesByParent(entries)
+    const [rootEntry] = childrenByParent.get(null)
+    return this.buildElementFromEntry(rootEntry, childrenByParent)
+  }
+
+  // Duplicates every selected top-level element/group/Bouton composé at
+  // once, all offset by the same amount so their relative layout is kept
+  // — same convention as most design tools' own Cmd/Ctrl+D. The new
+  // copies become the selection, ready to drag away immediately.
+  duplicateSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length === 0) return
+
+    const duplicates = selected.map((element) => this.duplicateSubtree(element, 20, 20))
+
+    this.reindexDepths()
+    this.selectedIds = new Set(duplicates.map((element) => element.id))
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
   // Bundles the currently selected top-level elements into a real Phaser
@@ -1685,6 +1780,63 @@ export class EditorScene extends Phaser.Scene {
   // loose top-level objects, so getBounds() reads the same numbers their
   // eventual local position will have), the same moment groupSelected
   // itself measures it.
+  //
+  // Shared by restoreSnapshot and duplicateSelected — both need to build
+  // real Phaser game objects from plain {id, type, parentId, props} data,
+  // just from a different source (undo history vs. a copy of the current
+  // selection).
+  groupEntriesByParent(entries) {
+    const childrenByParent = new Map()
+    for (const entry of entries) {
+      const key = entry.parentId ?? null
+      if (!childrenByParent.has(key)) childrenByParent.set(key, [])
+      childrenByParent.get(key).push(entry)
+    }
+    return childrenByParent
+  }
+
+  buildElementFromEntry(entry, childrenByParent) {
+    let gameObject
+    if (entry.type === 'group') {
+      gameObject = this.add.container(entry.props.x, entry.props.y)
+      if (entry.props.scaleX !== 1 || entry.props.scaleY !== 1) {
+        gameObject.setScale(entry.props.scaleX, entry.props.scaleY)
+      }
+    } else {
+      const definition = componentLibrary.find((component) => component.type === entry.type)
+      gameObject = definition.create(this, { ...entry.props })
+    }
+    gameObject.setData('elementId', entry.id)
+    gameObject.setData('elementType', entry.type)
+
+    const element = {
+      id: entry.id,
+      type: entry.type,
+      parentId: entry.parentId,
+      props: { ...entry.props },
+      gameObject,
+    }
+    this.elements.push(element)
+
+    const childElements = (childrenByParent.get(entry.id) ?? []).map((child) =>
+      this.buildElementFromEntry(child, childrenByParent),
+    )
+    if (entry.type === 'group' && childElements.length > 0) {
+      const bounds = this.getBoundsUnion(childElements)
+      gameObject.setSize(bounds.width, bounds.height)
+    }
+    for (const child of childElements) {
+      gameObject.add(child.gameObject)
+    }
+
+    if (typeof gameObject.setInteractive === 'function') {
+      gameObject.setInteractive({ useHandCursor: true })
+      this.input.setDraggable(gameObject)
+    }
+    this.syncCompositeVisual(element)
+    return element
+  }
+
   restoreSnapshot(historySnapshot) {
     const {
       elements: snapshot,
@@ -1700,55 +1852,9 @@ export class EditorScene extends Phaser.Scene {
     this.selectedIds = new Set()
     this.enteredGroupId = null
 
-    const childrenByParent = new Map()
-    for (const entry of snapshot) {
-      const key = entry.parentId ?? null
-      if (!childrenByParent.has(key)) childrenByParent.set(key, [])
-      childrenByParent.get(key).push(entry)
-    }
-
-    const buildEntry = (entry) => {
-      let gameObject
-      if (entry.type === 'group') {
-        gameObject = this.add.container(entry.props.x, entry.props.y)
-        if (entry.props.scaleX !== 1 || entry.props.scaleY !== 1) {
-          gameObject.setScale(entry.props.scaleX, entry.props.scaleY)
-        }
-      } else {
-        const definition = componentLibrary.find((component) => component.type === entry.type)
-        gameObject = definition.create(this, { ...entry.props })
-      }
-      gameObject.setData('elementId', entry.id)
-      gameObject.setData('elementType', entry.type)
-
-      const element = {
-        id: entry.id,
-        type: entry.type,
-        parentId: entry.parentId,
-        props: { ...entry.props },
-        gameObject,
-      }
-      this.elements.push(element)
-
-      const childElements = (childrenByParent.get(entry.id) ?? []).map(buildEntry)
-      if (entry.type === 'group' && childElements.length > 0) {
-        const bounds = this.getBoundsUnion(childElements)
-        gameObject.setSize(bounds.width, bounds.height)
-      }
-      for (const child of childElements) {
-        gameObject.add(child.gameObject)
-      }
-
-      if (typeof gameObject.setInteractive === 'function') {
-        gameObject.setInteractive({ useHandCursor: true })
-        this.input.setDraggable(gameObject)
-      }
-      this.syncCompositeVisual(element)
-      return element
-    }
-
+    const childrenByParent = this.groupEntriesByParent(snapshot)
     for (const entry of childrenByParent.get(null) ?? []) {
-      buildEntry(entry)
+      this.buildElementFromEntry(entry, childrenByParent)
     }
 
     const validIds = new Set(this.elements.map((element) => element.id))
