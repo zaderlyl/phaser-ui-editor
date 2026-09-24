@@ -1792,6 +1792,19 @@ export class EditorScene extends Phaser.Scene {
   resizeSelected(handle, dragX, dragY, keepAspectRatio = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
+    // Snaps the free corner itself (the one following the pointer) against
+    // every other top-level element's left/center/right and top/middle/
+    // bottom — reusing computeSnap with width/height 0 collapses its own
+    // three reference lines down to the corner's exact point, exactly what
+    // a corner has no "size" of its own to offer. The elements actually
+    // being resized are excluded so a selection never snaps to its own
+    // (about to change) edges.
+    const excludeIds = new Set(this.resizeSnapshot.map((entry) => entry.element.id))
+    const snappedCorner = this.computeSnap(excludeIds, 0, 0, dragX, dragY)
+    dragX = snappedCorner.x
+    dragY = snappedCorner.y
+    this.drawSnapGuides(snappedCorner.guides)
+
     const fixedX = handle.getData('fixedX')
     const fixedY = handle.getData('fixedY')
     const corner = handle.getData('corner')
