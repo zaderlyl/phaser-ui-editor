@@ -159,8 +159,18 @@ function generateCode({ props }) {
     // the button silently does nothing at all (no error either: Phaser
     // only surfaces the missing hit area if something explicitly calls
     // hitTestPointer, confirmed empirically, not on an ordinary click).
+    // The explicit Rectangle (rather than the simpler
+    // setInteractive({useHandCursor:true}), which derives one from
+    // width/height alone) matters too: a Container's displayOrigin is a
+    // fixed, non-configurable 0.5 regardless of setOrigin(), and Phaser
+    // always offsets the click point by it before testing the hitArea —
+    // so the simpler form would only make this button's top-left quadrant
+    // actually clickable (found and fixed while building Bouton composé,
+    // see EditorScene.makeInteractive's own note for the full trace
+    // through Phaser's hit-test source).
     `this.${name}.setSize(${Math.round(width)}, ${Math.round(height)});`,
-    `this.${name}.setInteractive({ useHandCursor: true });`,
+    `this.${name}.setInteractive(new Phaser.Geom.Rectangle(${Math.round(width) / 2}, ${Math.round(height) / 2}, ${Math.round(width)}, ${Math.round(height)}), Phaser.Geom.Rectangle.Contains);`,
+    `this.${name}.input.cursor = 'pointer';`,
     pointeroverLine,
     pointeroutLine,
     `this.${name}.on('pointerdown', () => this.${name}Background.setFillStyle(${hexPressedColor}).setStrokeStyle(${strokeThickness}, ${hexPressedStrokeColor}));`,

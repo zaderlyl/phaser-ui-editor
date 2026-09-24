@@ -13,7 +13,7 @@ const STATE_LABELS = { normal: 'Normal', hover: 'Survol', pressed: 'Appui' }
 // imagebutton.js) rather than simulating real pointer events — the live
 // canvas itself never shows these states either, for the same reason
 // (clicking there always means select/drag, never hover/press).
-export function StatePreviewModal({ element, onClose }) {
+export function StatePreviewModal({ element, allElements, onClose }) {
   const containerRef = useRef(null)
   const gameRef = useRef(null)
   const gameObjectRef = useRef(null)
@@ -23,9 +23,15 @@ export function StatePreviewModal({ element, onClose }) {
   // Only Bouton composé has children (separate elements on the main
   // canvas its own props merely reference by id — see statebutton.js) or
   // needs to resolve another type's own definition; every other type's
-  // hooks simply ignore these two extra arguments.
+  // hooks simply ignore these extra arguments.
   const children = element.children ?? []
   const lookupDefinition = (type) => componentLibrary.find((component) => component.type === type)
+  // A linked state can itself be a group (see EditorScene.linkAsStates'
+  // own "elements/groups") — groups aren't in componentLibrary (see
+  // registry.js's note), so resolving one's own children needs the full
+  // elements list instead, the same way generateGroupCode does for
+  // export. Only statebutton.js's own group-aware helpers use this.
+  const lookupChildren = (parentId) => (allElements ?? []).filter((el) => el.parentId === parentId)
   const states = definition?.getPreviewStates?.(element.props, children) ?? ['normal']
   const currentState = states[stateIndex] ?? states[0]
   // Texture loading below is async — if a créa flips the arrow before it
@@ -61,7 +67,8 @@ export function StatePreviewModal({ element, onClose }) {
           // codebase (see image.js/imagebutton.js's own generateCode).
           // Bouton's solid colors need nothing here (getPreviewTextures
           // returns []), so this resolves immediately for it.
-          const textures = definition.getPreviewTextures?.(element.props, children, lookupDefinition) ?? []
+          const textures =
+            definition.getPreviewTextures?.(element.props, children, lookupDefinition, lookupChildren) ?? []
           const loaded = textures.map(
             ({ key, data }) =>
               new Promise((resolve) => {
@@ -84,7 +91,7 @@ export function StatePreviewModal({ element, onClose }) {
             // creates them fresh in this isolated game — everything else
             // is fully described by previewProps alone.
             const gameObject = definition.createPreview
-              ? definition.createPreview(scene, previewProps, children, lookupDefinition)
+              ? definition.createPreview(scene, previewProps, children, lookupDefinition, lookupChildren)
               : definition.create(scene, previewProps)
             gameObjectRef.current = gameObject
             definition.applyPreviewState?.(gameObject, element.props, currentStateRef.current)

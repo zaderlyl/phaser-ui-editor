@@ -29,6 +29,9 @@ export function PropertiesPanel({
   onUngroup,
   onLinkAsStates,
   onAssignStateRole,
+  onAddChildToStateButton,
+  onRemoveStateButtonChild,
+  onUngroupStateButton,
   onReplaceImage,
   onSetProgressBarIcon,
   onSetImageButtonTexture,
@@ -106,6 +109,29 @@ export function PropertiesPanel({
             Lier comme bouton
           </button>
         )}
+
+        {/* Ajouter un état après coup: exactly one Bouton composé plus one
+            plain (non-linked) element selected together — the reverse of
+            "Extraire" below, see addChildToStateButton. Not shown once all
+            3 role slots are already taken, same reason the picker in the
+            single-element view below only lists linked children. */}
+        {(() => {
+          if (elements.length !== 2) return null
+          const stateButton = elements.find((element) => element.type === 'statebutton')
+          const other = elements.find((element) => element.id !== stateButton?.id)
+          if (!stateButton || !other || other.parentId) return null
+          const hasFreeSlot = !stateButton.props.normalChildId || !stateButton.props.hoverChildId || !stateButton.props.pressedChildId
+          if (!hasFreeSlot) return null
+          return (
+            <button
+              type="button"
+              className="properties-panel__group-button"
+              onClick={() => onAddChildToStateButton(stateButton.id, other.id)}
+            >
+              Ajouter à Bouton composé
+            </button>
+          )
+        })()}
 
         <button type="button" className="properties-panel__delete" onClick={onDeleteSelected}>
           Supprimer ({elements.length})
@@ -302,10 +328,27 @@ export function PropertiesPanel({
                     <option value="pressed">Appui</option>
                     <option value="none">Aucun</option>
                   </select>
+                  <button type="button" onClick={() => onRemoveStateButtonChild(id, child.id)}>
+                    Extraire
+                  </button>
                 </div>
               )
             })}
         </div>
+      )}
+
+      {/* Dégrouper: the reverse of "Lier comme bouton" — pulls every
+          linked child back out as an independent element and destroys
+          this Bouton composé, same convention as a plain group's own
+          Dégrouper below. */}
+      {'normalChildId' in props && (
+        <button
+          type="button"
+          className="properties-panel__group-button"
+          onClick={() => onUngroupStateButton(id)}
+        >
+          Dégrouper
+        </button>
       )}
 
       {('hoverColor' in props || 'hoverTextureKey' in props || 'normalChildId' in props) && (

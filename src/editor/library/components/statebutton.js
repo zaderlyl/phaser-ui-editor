@@ -84,39 +84,77 @@ function getPreviewStates(props, children = []) {
   return states.length > 0 ? states : ['normal']
 }
 
+// A linked state can itself be a group (see EditorScene.linkAsStates'
+// own "elements/groups" — a group is a perfectly normal thing to drag
+// the interaction arrow from/to), but a group isn't a registered
+// component (see registry.js's own note — generateScreenClass special-
+// cases it for exactly this reason), so lookupDefinition alone can't
+// build one. lookupChildren resolves a group's own children (by parentId,
+// same shape as EditorScene.elements) so this can recurse into nested
+// groups exactly like generateGroupCode does for export, just building
+// real Phaser game objects here instead of code text. Both helpers below
+// take lookupChildren and silently render nothing for a group if it
+// isn't supplied, rather than throwing.
+function createGroupPreview(scene, groupElement, lookupDefinition, lookupChildren) {
+  const { x, y, scaleX = 1, scaleY = 1 } = groupElement.props
+  const container = scene.add.container(x, y)
+  if (scaleX !== 1 || scaleY !== 1) container.setScale(scaleX, scaleY)
+  for (const child of lookupChildren?.(groupElement.id) ?? []) {
+    const gameObject =
+      child.type === 'group'
+        ? createGroupPreview(scene, child, lookupDefinition, lookupChildren)
+        : lookupDefinition(child.type)?.create(scene, { ...child.props })
+    if (gameObject) container.add(gameObject)
+  }
+  return container
+}
+
+function collectGroupPreviewTextures(groupElement, lookupDefinition, lookupChildren) {
+  return (lookupChildren?.(groupElement.id) ?? []).flatMap((child) =>
+    child.type === 'group'
+      ? collectGroupPreviewTextures(child, lookupDefinition, lookupChildren)
+      : (lookupDefinition(child.type)?.getPreviewTextures?.(child.props) ?? []),
+  )
+}
+
 // The state-preview modal's mini Phaser.Game has no idea these children
 // even exist (they're separate elements on the *main* canvas, not props
 // on this component) — so each child's own getPreviewTextures is
 // gathered here via `lookupDefinition`, a small registry lookup the modal
 // passes in to avoid statebutton.js importing the registry itself (which
 // imports this file, and would cycle back).
-function getPreviewTextures(props, children = [], lookupDefinition) {
+function getPreviewTextures(props, children = [], lookupDefinition, lookupChildren) {
   if (!lookupDefinition) return []
-  return children.flatMap((child) => {
-    const definition = lookupDefinition(child.type)
-    return definition?.getPreviewTextures?.(child.props) ?? []
-  })
+  return children.flatMap((child) =>
+    child.type === 'group'
+      ? collectGroupPreviewTextures(child, lookupDefinition, lookupChildren)
+      : (lookupDefinition(child.type)?.getPreviewTextures?.(child.props) ?? []),
+  )
 }
 
 // Unlike the main canvas (where children are reparented into an already-
 // existing container via linkAsStates, see EditorScene), the preview
 // modal's isolated Phaser.Game starts with nothing — so this builds each
-// linked child fresh, via its own definition's create(), tagged with
-// which state it represents so applyPreviewState can toggle it. Children
-// with no role assigned (see EditorScene.assignStateRole's "Aucun") are
-// skipped entirely, same as they're never shown on the main canvas either.
-// Centers the whole assembly on props.x/y (the preview's center point,
-// see StatePreviewModal) by width/height, mirroring how Bouton/Bouton
-// image center via originX/Y 0.5 on a single game object instead.
-function createPreview(scene, props, children, lookupDefinition) {
+// linked child fresh, via its own definition's create() (or
+// createGroupPreview, recursively, when the child is a group), tagged
+// with which state it represents so applyPreviewState can toggle it.
+// Children with no role assigned (see EditorScene.assignStateRole's
+// "Aucun") are skipped entirely, same as they're never shown on the main
+// canvas either. Centers the whole assembly on props.x/y (the preview's
+// center point, see StatePreviewModal) by width/height, mirroring how
+// Bouton/Bouton image center via originX/Y 0.5 on a single game object
+// instead.
+function createPreview(scene, props, children, lookupDefinition, lookupChildren) {
   const { x, y, width, height } = props
   const container = scene.add.container(x - width / 2, y - height / 2)
   for (const child of children) {
     const role = getChildRole(props, child.id)
     if (!role) continue
-    const definition = lookupDefinition(child.type)
-    if (!definition) continue
-    const gameObject = definition.create(scene, { ...child.props })
+    const gameObject =
+      child.type === 'group'
+        ? createGroupPreview(scene, child, lookupDefinition, lookupChildren)
+        : lookupDefinition(child.type)?.create(scene, { ...child.props })
+    if (!gameObject) continue
     gameObject.setData('role', role)
     container.add(gameObject)
   }
@@ -134,6 +172,22 @@ function applyPreviewState(container, props, state) {
   }
 }
 
+// Read by generateScreenClass to build the deduplicated list of stub
+// methods it appends to the class — same mechanism as Bouton's own. No
+// generateCode here, though (see generateScreenClass's own
+// generateStateButtonCode): unlike every other component, this one's
+// actual visual is 2-3 *other* elements it only references by id, so
+// building its exported subtree needs the full elements list to resolve
+// them — the same reason a group gets its own special case there instead
+// of going through the component library's generic generateCode hook.
+function getCallbackNames({ props }) {
+  return [props.callback].filter(Boolean)
+}
+
+function generateCallbackStub(name) {
+  return [`  ${name}() {`, '    // TODO: implement', '  }'].join('\n')
+}
+
 export const stateButtonComponent = {
   type: 'statebutton',
   label: 'Bouton composé',
@@ -144,4 +198,6 @@ export const stateButtonComponent = {
   getPreviewTextures,
   createPreview,
   applyPreviewState,
+  getCallbackNames,
+  generateCallbackStub,
 }
