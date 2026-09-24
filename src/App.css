@@ -59,6 +59,12 @@
   cursor: default;
 }
 
+.app-header__history-limit {
+  color: #9ca3af;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
 .app-body {
   flex: 1 1 auto;
   display: flex;

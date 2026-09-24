@@ -53,7 +53,7 @@ export class EditorScene extends Phaser.Scene {
     // canvas with no selection or entered group.
     this.undoStack = []
     this.redoStack = []
-    this.lastSnapshot = { elements: [], selectedIds: [], enteredGroupId: null }
+    this.lastSnapshot = { elements: [], selectedIds: [], enteredGroupId: null, typeCounters: {} }
     this.lastHistoryKey = null
     this.lastHistoryTime = 0
   }
@@ -1153,6 +1153,7 @@ export class EditorScene extends Phaser.Scene {
       elements: this.getElementsSnapshot(),
       selectedIds: [...this.selectedIds],
       enteredGroupId: this.enteredGroupId,
+      typeCounters: { ...this.typeCounters },
     }
   }
 
@@ -1218,6 +1219,9 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('historychange', {
       canUndo: this.undoStack.length > 0,
       canRedo: this.redoStack.length > 0,
+      undoCount: this.undoStack.length,
+      redoCount: this.redoStack.length,
+      maxEntries: MAX_HISTORY,
     })
   }
 
@@ -1267,7 +1271,12 @@ export class EditorScene extends Phaser.Scene {
   // eventual local position will have), the same moment groupSelected
   // itself measures it.
   restoreSnapshot(historySnapshot) {
-    const { elements: snapshot, selectedIds = [], enteredGroupId = null } = historySnapshot
+    const {
+      elements: snapshot,
+      selectedIds = [],
+      enteredGroupId = null,
+      typeCounters = {},
+    } = historySnapshot
 
     for (const element of this.elements) {
       if (!element.parentId) element.gameObject.destroy()
@@ -1330,6 +1339,7 @@ export class EditorScene extends Phaser.Scene {
     const validIds = new Set(this.elements.map((element) => element.id))
     this.selectedIds = new Set(selectedIds.filter((id) => validIds.has(id)))
     this.enteredGroupId = validIds.has(enteredGroupId) ? enteredGroupId : null
+    this.typeCounters = { ...typeCounters }
     this.reindexDepths()
     this.drawSelection()
     this.events.emit('elementsChange', this.getElementsSnapshot())

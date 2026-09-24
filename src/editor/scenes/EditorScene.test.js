@@ -160,6 +160,16 @@ describe('EditorScene undo/redo', () => {
     expect([...scene.selectedIds]).toEqual([element.id])
   })
 
+  it('restores type counters after undoing an addition', () => {
+    addPanel(scene)
+    addPanel(scene)
+    scene.undo()
+
+    const replacement = addPanel(scene)
+
+    expect(replacement.props.name).toBe('panel2')
+  })
+
   it('undoes a property modification', () => {
     const element = addPanel(scene)
     const initialX = element.props.x

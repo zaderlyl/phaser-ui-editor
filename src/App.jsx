@@ -20,7 +20,13 @@ function App() {
   // Mirrors EditorScene's own undo/redo stacks (see its 'historychange'
   // event) purely to enable/disable the two header buttons — the actual
   // history lives in the scene, not here.
-  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false })
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    undoCount: 0,
+    redoCount: 0,
+    maxEntries: 100,
+  })
 
   const handleSceneReady = useCallback((scene) => {
     sceneRef.current = scene
@@ -120,6 +126,12 @@ function App() {
           >
             ↷ Rétablir
           </button>
+          <span
+            className="app-header__history-limit"
+            title="Les plus anciennes actions sont supprimées au-delà de cette limite"
+          >
+            Historique {historyState.undoCount}/{historyState.maxEntries}
+          </span>
           <button type="button" className="app-header__export" onClick={() => setExportOpen(true)}>
             Exporter
           </button>
