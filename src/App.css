@@ -17,6 +17,12 @@
   border-bottom: 1px solid #2a2d38;
 }
 
+.app-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .app-header__export {
   padding: 0.4rem 0.8rem;
   background: #60a5fa;
@@ -31,6 +37,26 @@
 
 .app-header__export:hover {
   background: #7bb4fb;
+}
+
+.app-header__history {
+  padding: 0.4rem 0.7rem;
+  background: transparent;
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-family: monospace;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.app-header__history:hover:not(:disabled) {
+  background: #1d1f27;
+}
+
+.app-header__history:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .app-body {

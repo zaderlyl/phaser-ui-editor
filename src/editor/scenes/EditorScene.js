@@ -14,6 +14,16 @@ const CORNERS = ['tl', 'tr', 'bl', 'br']
 // Matches a valid JS identifier — the generated code will use this name
 // directly as a property (this.<name>), so it must be a legal one.
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+// How many undo steps to keep — old enough entries just fall off rather
+// than growing the stack forever.
+const MAX_HISTORY = 100
+// A properties-panel edit (or a rename) fires once per keystroke — see
+// updateElementProps' own note — so without coalescing, typing "160" into
+// a width field would take three separate undos to get back out of.
+// Commits with the same coalesceKey within this window merge into the
+// entry already on the stack instead of pushing a new one; pausing this
+// long (or doing anything else) starts a fresh step.
+const HISTORY_COALESCE_MS = 600
 
 // Editing surface: a real Phaser scene, so whatever renders here is pixel-identical
 // to what the exported UI will look like in the actual game.
@@ -36,6 +46,15 @@ export class EditorScene extends Phaser.Scene {
     this.enteredGroupId = null
     this.lastClickedId = null
     this.lastClickTime = 0
+    // Undo/redo: each entry is a full getElementsSnapshot() (plain data,
+    // no GameObject refs) — see commitHistory/restoreSnapshot. lastSnapshot
+    // is always "the state as of the most recent commit", i.e. what the
+    // *next* commit's undo entry should be — starts at the empty canvas.
+    this.undoStack = []
+    this.redoStack = []
+    this.lastSnapshot = []
+    this.lastHistoryKey = null
+    this.lastHistoryTime = 0
   }
 
   create() {
@@ -320,8 +339,9 @@ export class EditorScene extends Phaser.Scene {
       // the moved/resized element(s) — cheap per-tick updates meant for the
       // properties panel, not a full sync. Consumers that need the whole
       // list current (the layers panel, code export) only get one once the
-      // drag actually settles here.
-      this.events.emit('elementsChange', this.getElementsSnapshot())
+      // drag actually settles here — also the one undo/redo step for the
+      // whole gesture, not one per tick.
+      this.commitHistory()
     })
 
     // Delete/Backspace removes every selected element — but only when the
@@ -353,6 +373,34 @@ export class EditorScene extends Phaser.Scene {
       } else {
         this.groupSelected()
       }
+    })
+
+    // Cmd+Z (Mac) / Ctrl+Z (Windows/Linux) undoes; adding Shift redoes
+    // instead — Ctrl+Y also redoes, the Windows/Linux convention most
+    // créas coming from other editors will reach for first. Browsers
+    // default Ctrl/Cmd+Z to undoing text input in whatever field has
+    // focus — preventDefault stops that (and the INPUT/TEXTAREA guard
+    // below leaves an actual text field's own undo alone entirely, same
+    // reasoning as the delete-key handler above).
+    const handleUndoRedoKey = (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!(event.ctrlKey || event.metaKey)) return
+
+      event.preventDefault()
+      if (event.shiftKey) {
+        this.redo()
+      } else {
+        this.undo()
+      }
+    }
+    this.input.keyboard.on('keydown-Z', handleUndoRedoKey)
+    this.input.keyboard.on('keydown-Y', (event) => {
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      if (!(event.ctrlKey || event.metaKey)) return
+      event.preventDefault()
+      this.redo()
     })
   }
 
@@ -386,12 +434,21 @@ export class EditorScene extends Phaser.Scene {
     // New elements go on top, matching most editors' default stacking.
     this.elements.push(element)
     this.reindexDepths()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
     return element
   }
 
-  removeElement(id) {
-    if (!this.elements.some((element) => element.id === id)) return
+  // Mechanics only, no history commit — see removeElement/
+  // removeSelectedElements, its two callers, which each commit exactly
+  // once for their *whole* operation. Without this split, removing a
+  // group would push one undo step per child (via this method's own
+  // recursion below) plus one for the group itself, and deleting a multi-
+  // selection would push one step per element, instead of a single "undo
+  // this delete" either way. Returns whether anything was actually
+  // removed, so a caller pushed into every id in a stale selection
+  // doesn't commit an empty no-op step.
+  removeElementInternal(id) {
+    if (!this.elements.some((element) => element.id === id)) return false
 
     // Removing a group takes its children down with it — Phaser's own
     // Container.destroy() already destroys them, this just keeps
@@ -402,11 +459,11 @@ export class EditorScene extends Phaser.Scene {
       .filter((element) => element.parentId === id)
       .map((element) => element.id)
     for (const childId of childIds) {
-      this.removeElement(childId)
+      this.removeElementInternal(childId)
     }
 
     const index = this.elements.findIndex((element) => element.id === id)
-    if (index === -1) return
+    if (index === -1) return false
 
     const wasSelected = this.selectedIds.delete(id)
     if (wasSelected) {
@@ -417,13 +474,19 @@ export class EditorScene extends Phaser.Scene {
     const [element] = this.elements.splice(index, 1)
     element.gameObject.destroy()
     this.reindexDepths()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    return true
+  }
+
+  removeElement(id) {
+    if (this.removeElementInternal(id)) this.commitHistory()
   }
 
   removeSelectedElements() {
+    let removedAny = false
     for (const id of [...this.selectedIds]) {
-      this.removeElement(id)
+      if (this.removeElementInternal(id)) removedAny = true
     }
+    if (removedAny) this.commitHistory()
   }
 
   // Bundles the currently selected top-level elements into a real Phaser
@@ -483,7 +546,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.selectedIds = new Set([groupId])
     this.drawSelection()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
@@ -582,7 +645,7 @@ export class EditorScene extends Phaser.Scene {
     this.reindexDepths()
     this.selectedIds = new Set(freedIds)
     this.drawSelection()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
@@ -615,7 +678,7 @@ export class EditorScene extends Phaser.Scene {
     this.reindexDepths()
     this.selectedIds = new Set([childId])
     this.drawSelection()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
@@ -628,7 +691,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.elements = reordered
     this.reindexDepths()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
   }
 
   // Depth follows array order (index 0 = backmost), so paint order always
@@ -806,7 +869,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
   }
 
   // Same event-delegation pattern as requestImageReplace, for ProgressBar's
@@ -832,7 +895,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
   }
 
   // Same event-delegation pattern as requestImageReplace/
@@ -858,7 +921,7 @@ export class EditorScene extends Phaser.Scene {
     element.props[`${slot}ImageData`] = imageData
 
     this.events.emit('elementchange', this.getElementSnapshot(id))
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
   }
 
   // Applies a partial props update (e.g. from the properties panel) to an
@@ -966,8 +1029,10 @@ export class EditorScene extends Phaser.Scene {
     // so unlike resizeSelected there's no perf reason to skip this — and
     // without it the layers panel and code export kept reading whatever
     // this element's props were before the edit (see dragend's identical
-    // fix for the same staleness on drag/resize).
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    // fix for the same staleness on drag/resize). Coalesced per element
+    // (see commitHistory) so typing several characters into the same field
+    // is one undo step, not one per keystroke.
+    this.commitHistory(`props:${id}`)
   }
 
   // Renames an element after validating it as a JS identifier (it becomes
@@ -992,7 +1057,9 @@ export class EditorScene extends Phaser.Scene {
 
     element.props.name = name
     this.events.emit('elementchange', this.getElementSnapshot(id))
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    // Coalesced per element, same reason as updateElementProps — renaming
+    // fires once per keystroke too.
+    this.commitHistory(`props:${id}`)
     return { success: true }
   }
 
@@ -1044,7 +1111,7 @@ export class EditorScene extends Phaser.Scene {
     }
 
     this.drawSelection()
-    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.commitHistory()
   }
 
   // Plain-object copy of an element (no GameObject reference), safe to hand
@@ -1084,6 +1151,157 @@ export class EditorScene extends Phaser.Scene {
         parentId: element.parentId,
         props: { ...element.props },
       }))
+  }
+
+  // Central undo/redo commit point — the many call sites below replace a
+  // plain 'elementsChange' emit with this instead. Every one of them
+  // already marks the exact moment a change is "final" rather than a live
+  // drag tick (see dragend's own note on why elementsChange only fires
+  // once a drag settles, and resizeSelected's still-plain emit for the
+  // same reason mid-resize) — exactly the granularity undo/redo should
+  // use: one step per completed action, not one per pointer-move tick.
+  //
+  // coalesceKey merges this commit into the one already on top of the
+  // stack instead of pushing a new entry, as long as the key matches and
+  // not too long has passed (see HISTORY_COALESCE_MS) — used by
+  // updateElementProps/renameElement, which otherwise fire once per
+  // keystroke. Any other action (a different key, or none) always pushes
+  // a fresh step.
+  commitHistory(coalesceKey = null) {
+    const now = performance.now()
+    const coalesce =
+      coalesceKey &&
+      coalesceKey === this.lastHistoryKey &&
+      now - this.lastHistoryTime < HISTORY_COALESCE_MS
+
+    if (!coalesce) {
+      this.undoStack.push(this.lastSnapshot)
+      if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift()
+      this.redoStack = []
+    }
+
+    this.lastSnapshot = this.getElementsSnapshot()
+    this.lastHistoryKey = coalesceKey
+    this.lastHistoryTime = now
+    this.events.emit('elementsChange', this.lastSnapshot)
+    this.emitHistoryChange()
+  }
+
+  emitHistoryChange() {
+    this.events.emit('historychange', {
+      canUndo: this.undoStack.length > 0,
+      canRedo: this.redoStack.length > 0,
+    })
+  }
+
+  undo() {
+    if (this.undoStack.length === 0) return
+    const previous = this.undoStack.pop()
+    this.redoStack.push(this.lastSnapshot)
+    this.lastHistoryKey = null
+    this.restoreSnapshot(previous)
+    this.lastSnapshot = previous
+    this.emitHistoryChange()
+  }
+
+  redo() {
+    if (this.redoStack.length === 0) return
+    const next = this.redoStack.pop()
+    this.undoStack.push(this.lastSnapshot)
+    this.lastHistoryKey = null
+    this.restoreSnapshot(next)
+    this.lastSnapshot = next
+    this.emitHistoryChange()
+  }
+
+  // Rebuilds the entire scene from a plain-data snapshot (see
+  // getElementsSnapshot) — the actual mechanics behind undo/redo. Rather
+  // than diffing against the current live state (which would need to
+  // separately handle "recreate this deleted element" vs "reposition that
+  // one" vs "reparent this other one", each with its own bug surface),
+  // this just tears everything down and rebuilds it fresh: destroying
+  // every top-level GameObject cascades to every nested child for free
+  // (Phaser's own Container.destroy()), and building back up from plain
+  // {id, type, parentId, props} data can reuse each component's own
+  // create() the same way addElement already does.
+  //
+  // A child's props.x/y are already container-local (every reparenting
+  // site in this file stores them that way), so a child is created as a
+  // loose top-level object at that same x/y and then simply added to its
+  // parent's Container — Container.add() adopts existing x/y as local
+  // as-is, no conversion needed, exactly like a live group/child creation
+  // never runs through world-to-local math either.
+  //
+  // A group isn't a registered component (see groupSelected's own
+  // handling, mirrored here) and doesn't store width/height in its props
+  // — its hit area is recomputed from its just-created children's own
+  // bounds, measured *before* they're reparented in (while they're still
+  // loose top-level objects, so getBounds() reads the same numbers their
+  // eventual local position will have), the same moment groupSelected
+  // itself measures it.
+  restoreSnapshot(snapshot) {
+    for (const element of this.elements) {
+      if (!element.parentId) element.gameObject.destroy()
+    }
+    this.elements = []
+    this.selectedIds = new Set()
+    this.enteredGroupId = null
+
+    const childrenByParent = new Map()
+    for (const entry of snapshot) {
+      const key = entry.parentId ?? null
+      if (!childrenByParent.has(key)) childrenByParent.set(key, [])
+      childrenByParent.get(key).push(entry)
+    }
+
+    const buildEntry = (entry) => {
+      let gameObject
+      if (entry.type === 'group') {
+        gameObject = this.add.container(entry.props.x, entry.props.y)
+        if (entry.props.scaleX !== 1 || entry.props.scaleY !== 1) {
+          gameObject.setScale(entry.props.scaleX, entry.props.scaleY)
+        }
+      } else {
+        const definition = componentLibrary.find((component) => component.type === entry.type)
+        gameObject = definition.create(this, { ...entry.props })
+      }
+      gameObject.setData('elementId', entry.id)
+      gameObject.setData('elementType', entry.type)
+
+      const element = {
+        id: entry.id,
+        type: entry.type,
+        parentId: entry.parentId,
+        props: { ...entry.props },
+        gameObject,
+      }
+      this.elements.push(element)
+
+      const childElements = (childrenByParent.get(entry.id) ?? []).map(buildEntry)
+      if (entry.type === 'group' && childElements.length > 0) {
+        const bounds = this.getBoundsUnion(childElements)
+        gameObject.setSize(bounds.width, bounds.height)
+      }
+      for (const child of childElements) {
+        gameObject.add(child.gameObject)
+      }
+
+      if (typeof gameObject.setInteractive === 'function') {
+        gameObject.setInteractive({ useHandCursor: true })
+        this.input.setDraggable(gameObject)
+      }
+      this.syncCompositeVisual(element)
+      return element
+    }
+
+    for (const entry of childrenByParent.get(null) ?? []) {
+      buildEntry(entry)
+    }
+
+    this.reindexDepths()
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
   // Resizes the whole selection so the dragged corner follows the pointer
