@@ -17,6 +17,16 @@ function App() {
   // des états" was clicked — not just "the current selection", since the
   // selection could change while the modal stays open.
   const [previewElement, setPreviewElement] = useState(null)
+  // Mirrors EditorScene's own undo/redo stacks (see its 'historychange'
+  // event) purely to enable/disable the two header buttons — the actual
+  // history lives in the scene, not here.
+  const [historyState, setHistoryState] = useState({
+    canUndo: false,
+    canRedo: false,
+    undoCount: 0,
+    redoCount: 0,
+    maxEntries: 100,
+  })
 
   const handleSceneReady = useCallback((scene) => {
     sceneRef.current = scene
@@ -98,6 +108,14 @@ function App() {
     setPreviewElement({ ...element, children })
   }, [])
 
+  const handleUndo = useCallback(() => {
+    sceneRef.current?.undo()
+  }, [])
+
+  const handleRedo = useCallback(() => {
+    sceneRef.current?.redo()
+  }, [])
+
   // Live position/size/name updates from a single-element drag, resize or
   // rename (see EditorScene's 'elementchange') only ever concern the one
   // element currently selected, so just refresh it in place.
@@ -109,9 +127,35 @@ function App() {
     <div className="app">
       <header className="app-header">
         <span>Phaser UI Editor</span>
-        <button type="button" className="app-header__export" onClick={() => setExportOpen(true)}>
-          Exporter
-        </button>
+        <div className="app-header__actions">
+          <button
+            type="button"
+            className="app-header__history"
+            onClick={handleUndo}
+            disabled={!historyState.canUndo}
+            title="Annuler (⌘Z)"
+          >
+            ↶ Annuler
+          </button>
+          <button
+            type="button"
+            className="app-header__history"
+            onClick={handleRedo}
+            disabled={!historyState.canRedo}
+            title="Rétablir (⌘⇧Z)"
+          >
+            ↷ Rétablir
+          </button>
+          <span
+            className="app-header__history-limit"
+            title="Les plus anciennes actions sont supprimées au-delà de cette limite"
+          >
+            Historique {historyState.undoCount}/{historyState.maxEntries}
+          </span>
+          <button type="button" className="app-header__export" onClick={() => setExportOpen(true)}>
+            Exporter
+          </button>
+        </div>
       </header>
       <div className="app-body">
         <div className="left-sidebar">
@@ -130,6 +174,7 @@ function App() {
             onSelectionChange={setSelectedElements}
             onElementChange={handleElementChange}
             onElementsChange={setElements}
+            onHistoryChange={setHistoryState}
           />
         </main>
         <PropertiesPanel
