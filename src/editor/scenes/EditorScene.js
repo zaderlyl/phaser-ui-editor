@@ -46,13 +46,14 @@ export class EditorScene extends Phaser.Scene {
     this.enteredGroupId = null
     this.lastClickedId = null
     this.lastClickTime = 0
-    // Undo/redo: each entry is a full getElementsSnapshot() (plain data,
-    // no GameObject refs) — see commitHistory/restoreSnapshot. lastSnapshot
-    // is always "the state as of the most recent commit", i.e. what the
-    // *next* commit's undo entry should be — starts at the empty canvas.
+    // Undo/redo: each entry contains the full element snapshot plus the
+    // editor context needed to restore the user's place after undo/redo.
+    // lastSnapshot is always "the state as of the most recent commit", i.e.
+    // what the *next* commit's undo entry should be — starts at the empty
+    // canvas with no selection or entered group.
     this.undoStack = []
     this.redoStack = []
-    this.lastSnapshot = []
+    this.lastSnapshot = { elements: [], selectedIds: [], enteredGroupId: null }
     this.lastHistoryKey = null
     this.lastHistoryTime = 0
   }
@@ -733,6 +734,7 @@ export class EditorScene extends Phaser.Scene {
       ? new Set([...this.marqueeBaseSelection, ...overlapping.map((element) => element.id)])
       : new Set(overlapping.map((element) => element.id))
 
+    this.syncHistoryContext()
     this.drawSelection()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
@@ -750,14 +752,19 @@ export class EditorScene extends Phaser.Scene {
       this.selectedIds = new Set([id])
     }
 
+    this.syncHistoryContext()
     this.drawSelection()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
   deselectAll() {
-    if (this.selectedIds.size === 0) return
+    if (this.selectedIds.size === 0) {
+      this.syncHistoryContext()
+      return
+    }
 
     this.selectedIds = new Set()
+    this.syncHistoryContext()
     this.selectionGraphics.clear()
     this.setHandlesVisible(false)
     this.events.emit('selectionchange', [])
@@ -1140,6 +1147,25 @@ export class EditorScene extends Phaser.Scene {
     }))
   }
 
+  getHistorySnapshot() {
+    return {
+      elements: this.getElementsSnapshot(),
+      selectedIds: [...this.selectedIds],
+      enteredGroupId: this.enteredGroupId,
+    }
+  }
+
+  // Selection and group-entry changes are navigation state rather than
+  // separate document edits. Keep the active history entry current so the
+  // next undo/redo restores the context that was visible before the edit.
+  syncHistoryContext() {
+    this.lastSnapshot = {
+      ...this.lastSnapshot,
+      selectedIds: [...this.selectedIds],
+      enteredGroupId: this.enteredGroupId,
+    }
+  }
+
   // Snapshot of the current selection, in this.elements' (back-to-front)
   // order — what the properties panel renders (single vs. multi state).
   getSelectionSnapshot() {
@@ -1180,10 +1206,10 @@ export class EditorScene extends Phaser.Scene {
       this.redoStack = []
     }
 
-    this.lastSnapshot = this.getElementsSnapshot()
+    this.lastSnapshot = this.getHistorySnapshot()
     this.lastHistoryKey = coalesceKey
     this.lastHistoryTime = now
-    this.events.emit('elementsChange', this.lastSnapshot)
+    this.events.emit('elementsChange', this.lastSnapshot.elements)
     this.emitHistoryChange()
   }
 
@@ -1215,7 +1241,7 @@ export class EditorScene extends Phaser.Scene {
   }
 
   // Rebuilds the entire scene from a plain-data snapshot (see
-  // getElementsSnapshot) — the actual mechanics behind undo/redo. Rather
+  // getHistorySnapshot) — the actual mechanics behind undo/redo. Rather
   // than diffing against the current live state (which would need to
   // separately handle "recreate this deleted element" vs "reposition that
   // one" vs "reparent this other one", each with its own bug surface),
@@ -1239,7 +1265,9 @@ export class EditorScene extends Phaser.Scene {
   // loose top-level objects, so getBounds() reads the same numbers their
   // eventual local position will have), the same moment groupSelected
   // itself measures it.
-  restoreSnapshot(snapshot) {
+  restoreSnapshot(historySnapshot) {
+    const { elements: snapshot, selectedIds = [], enteredGroupId = null } = historySnapshot
+
     for (const element of this.elements) {
       if (!element.parentId) element.gameObject.destroy()
     }
@@ -1298,6 +1326,9 @@ export class EditorScene extends Phaser.Scene {
       buildEntry(entry)
     }
 
+    const validIds = new Set(this.elements.map((element) => element.id))
+    this.selectedIds = new Set(selectedIds.filter((id) => validIds.has(id)))
+    this.enteredGroupId = validIds.has(enteredGroupId) ? enteredGroupId : null
     this.reindexDepths()
     this.drawSelection()
     this.events.emit('elementsChange', this.getElementsSnapshot())
