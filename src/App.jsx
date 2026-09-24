@@ -70,6 +70,18 @@ function App() {
     sceneRef.current?.assignStateRole(id, childId, role)
   }, [])
 
+  const handleAddChildToStateButton = useCallback((id, childId) => {
+    sceneRef.current?.addChildToStateButton(id, childId)
+  }, [])
+
+  const handleRemoveStateButtonChild = useCallback((id, childId) => {
+    sceneRef.current?.removeChildFromStateButton(id, childId)
+  }, [])
+
+  const handleUngroupStateButton = useCallback((id) => {
+    sceneRef.current?.ungroupStateButton(id)
+  }, [])
+
   const handleReplaceImage = useCallback((id) => {
     sceneRef.current?.requestImageReplace(id)
   }, [])
@@ -132,6 +144,9 @@ function App() {
           onUngroup={handleUngroup}
           onLinkAsStates={handleLinkAsStates}
           onAssignStateRole={handleAssignStateRole}
+          onAddChildToStateButton={handleAddChildToStateButton}
+          onRemoveStateButtonChild={handleRemoveStateButtonChild}
+          onUngroupStateButton={handleUngroupStateButton}
           onReplaceImage={handleReplaceImage}
           onSetProgressBarIcon={handleSetProgressBarIcon}
           onSetImageButtonTexture={handleSetImageButtonTexture}

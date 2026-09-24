@@ -607,6 +607,98 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('elementsChange', this.getElementsSnapshot())
   }
 
+  // "Ajouter un état" — reparents an existing top-level element (or group)
+  // into a Bouton composé, auto-assigning it to the first empty role slot
+  // (Normal, then Survol, then Appui — reassignable afterwards via
+  // assignStateRole, same as linkAsStates' own guess). No-op once all
+  // three slots are already taken: adding a 4th child with no role would
+  // never be hidden by syncVisual, sitting on top of whichever state
+  // shows. Doesn't touch the container's own width/height — a créa can
+  // resize it by hand afterwards the same way as any other element.
+  addChildToStateButton(id, childId) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'statebutton') return
+    const child = this.elements.find((el) => el.id === childId && !el.parentId)
+    if (!child || child.id === id) return
+
+    const roleKeys = ['normalChildId', 'hoverChildId', 'pressedChildId']
+    const emptyKey = roleKeys.find((key) => !element.props[key])
+    if (!emptyKey) return
+
+    // Same world-to-local conversion as linkAsStates/groupSelected — the
+    // container's own x/y IS its top-left (see its create()'s note), so
+    // this is a plain offset, no bounds recomputation needed.
+    child.gameObject.x -= element.gameObject.x
+    child.gameObject.y -= element.gameObject.y
+    element.gameObject.add(child.gameObject)
+    child.parentId = id
+    child.props.x = child.gameObject.x
+    child.props.y = child.gameObject.y
+    element.props[emptyKey] = child.id
+
+    this.syncCompositeVisual(element)
+    this.reindexDepths()
+    this.selectedIds = new Set([id])
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // "Retirer" a single linked child — the reverse of addChildToStateButton,
+  // pulling just that one child back onto the canvas as an independent
+  // element while the button and its other children stay put (unlike
+  // ungroupStateButton below, which dissolves the whole thing). Reuses
+  // reparentToScene, the exact same per-child mechanics groupSelected's
+  // own ungroup uses — it's generic over any Container-based composite
+  // that owns element children, not specific to 'group'.
+  removeChildFromStateButton(id, childId) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'statebutton') return
+    const child = this.elements.find((el) => el.id === childId && el.parentId === id)
+    if (!child) return
+
+    this.reparentToScene(child, element)
+    for (const key of ['normalChildId', 'hoverChildId', 'pressedChildId']) {
+      if (element.props[key] === childId) element.props[key] = null
+    }
+    this.syncCompositeVisual(element)
+
+    this.reindexDepths()
+    this.selectedIds = new Set([childId])
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // "Dégrouper" a Bouton composé — the reverse of linkAsStates, pulling
+  // every linked child back onto the canvas as an independent top-level
+  // element and destroying the button itself. reparentToScene/destroyGroup
+  // are the same generic per-child mechanics ungroupSelected's own group
+  // case uses, just driven directly here since a Bouton composé always
+  // gives up ALL its children at once (no "leaves fewer than 2, so the
+  // last one comes out too" recursion needed the way a group's partial
+  // ungroup has).
+  ungroupStateButton(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'statebutton') return
+
+    const children = this.elements.filter((el) => el.parentId === id)
+    const freedIds = []
+    for (const child of children) {
+      this.reparentToScene(child, element)
+      freedIds.push(child.id)
+    }
+    this.destroyGroup(element)
+
+    this.reindexDepths()
+    this.selectedIds = new Set(freedIds)
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
   // Pulls one child out of its group's Container and back onto the scene
   // directly, at its current WORLD position — getBounds() already accounts
   // for the container's position *and* scale, so a child of a group that
