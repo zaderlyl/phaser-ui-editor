@@ -20,7 +20,13 @@ export function StatePreviewModal({ element, onClose }) {
   const [stateIndex, setStateIndex] = useState(0)
 
   const definition = componentLibrary.find((component) => component.type === element.type)
-  const states = definition?.getPreviewStates?.(element.props) ?? ['normal']
+  // Only Bouton composé has children (separate elements on the main
+  // canvas its own props merely reference by id — see statebutton.js) or
+  // needs to resolve another type's own definition; every other type's
+  // hooks simply ignore these two extra arguments.
+  const children = element.children ?? []
+  const lookupDefinition = (type) => componentLibrary.find((component) => component.type === type)
+  const states = definition?.getPreviewStates?.(element.props, children) ?? ['normal']
   const currentState = states[stateIndex] ?? states[0]
   // Texture loading below is async — if a créa flips the arrow before it
   // resolves, the game-creation effect's own closure would otherwise
@@ -55,7 +61,7 @@ export function StatePreviewModal({ element, onClose }) {
           // codebase (see image.js/imagebutton.js's own generateCode).
           // Bouton's solid colors need nothing here (getPreviewTextures
           // returns []), so this resolves immediately for it.
-          const textures = definition.getPreviewTextures?.(element.props) ?? []
+          const textures = definition.getPreviewTextures?.(element.props, children, lookupDefinition) ?? []
           const loaded = textures.map(
             ({ key, data }) =>
               new Promise((resolve) => {
@@ -73,7 +79,13 @@ export function StatePreviewModal({ element, onClose }) {
             // own note on why), which must not leak back into the real
             // element just because its preview was opened.
             const previewProps = { ...element.props, x: previewWidth / 2, y: previewHeight / 2, originX: 0.5, originY: 0.5 }
-            const gameObject = definition.create(scene, previewProps)
+            // Bouton composé's children live outside its own props (see
+            // above), so it gets its own builder that resolves and
+            // creates them fresh in this isolated game — everything else
+            // is fully described by previewProps alone.
+            const gameObject = definition.createPreview
+              ? definition.createPreview(scene, previewProps, children, lookupDefinition)
+              : definition.create(scene, previewProps)
             gameObjectRef.current = gameObject
             definition.applyPreviewState?.(gameObject, element.props, currentStateRef.current)
           })

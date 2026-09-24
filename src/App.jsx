@@ -82,8 +82,8 @@ function App() {
     sceneRef.current?.requestImageButtonTexture(id, slot)
   }, [])
 
-  const handleOpenStatePreview = useCallback((element) => {
-    setPreviewElement(element)
+  const handleOpenStatePreview = useCallback((element, children = []) => {
+    setPreviewElement({ ...element, children })
   }, [])
 
   // Live position/size/name updates from a single-element drag, resize or

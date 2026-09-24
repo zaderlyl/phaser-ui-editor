@@ -308,12 +308,17 @@ export function PropertiesPanel({
         </div>
       )}
 
-      {('hoverColor' in props || 'hoverTextureKey' in props) && (
+      {('hoverColor' in props || 'hoverTextureKey' in props || 'normalChildId' in props) && (
         <div className="properties-panel__group">
           <button
             type="button"
             className="properties-panel__group-button"
-            onClick={() => onOpenStatePreview(single)}
+            onClick={() =>
+              onOpenStatePreview(
+                single,
+                (allElements ?? []).filter((element) => element.parentId === id),
+              )
+            }
           >
             Aperçu des états
           </button>
