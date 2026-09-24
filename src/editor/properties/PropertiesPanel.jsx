@@ -24,6 +24,7 @@ export function PropertiesPanel({
   onRename,
   onDelete,
   onDeleteSelected,
+  onDuplicate,
   onAlign,
   onGroup,
   onUngroup,
@@ -96,6 +97,10 @@ export function PropertiesPanel({
             </button>
           </div>
         </div>
+
+        <button type="button" className="properties-panel__group-button" onClick={onDuplicate}>
+          Dupliquer (⌘D)
+        </button>
 
         <button type="button" className="properties-panel__group-button" onClick={onGroup}>
           Grouper (⌘G)
@@ -917,6 +922,12 @@ export function PropertiesPanel({
             </label>
           </div>
         </div>
+      )}
+
+      {!single.parentId && (
+        <button type="button" className="properties-panel__group-button" onClick={onDuplicate}>
+          Dupliquer (⌘D)
+        </button>
       )}
 
       {single.type === 'group' && (
