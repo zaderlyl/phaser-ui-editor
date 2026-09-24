@@ -156,7 +156,11 @@ function App() {
 
       {isExportOpen && <ExportModal elements={elements} onClose={() => setExportOpen(false)} />}
       {previewElement && (
-        <StatePreviewModal element={previewElement} onClose={() => setPreviewElement(null)} />
+        <StatePreviewModal
+          element={previewElement}
+          allElements={elements}
+          onClose={() => setPreviewElement(null)}
+        />
       )}
     </div>
   )
