@@ -59,7 +59,24 @@ export function ExportModal({ elements, onClose }) {
 
   return (
     <div className="export-modal__backdrop" onClick={onClose}>
-      <div className="export-modal" onClick={(event) => event.stopPropagation()}>
+      {/* Both stopPropagation calls matter, not just one: Phaser's own
+          InputManager listens for 'mousedown' directly on `window` (not
+          scoped to the canvas), and only checks whether the click's
+          screen coordinates fall within the canvas's own bounding rect —
+          it has no notion of DOM z-index/overlays, so a click on this
+          modal (which visually covers the canvas) would otherwise still
+          reach Phaser as "clicked the canvas background" and deselect
+          whatever's selected there. onClick's stopPropagation alone
+          doesn't prevent that: 'mousedown' fires and fully bubbles to
+          `window` *before* the synthesized 'click' event even exists, so
+          it needs its own stop. Confirmed via a real repro (a stack
+          trace through Phaser's onMouseDownWindow into EditorScene's
+          deselectAll) while building the similar StatePreviewModal. */}
+      <div
+        className="export-modal"
+        onClick={(event) => event.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="export-modal__header">
           <label className="export-modal__name-field">
             Nom de la classe

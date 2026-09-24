@@ -29,6 +29,7 @@ export function PropertiesPanel({
   onReplaceImage,
   onSetProgressBarIcon,
   onSetImageButtonTexture,
+  onOpenStatePreview,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -257,6 +258,18 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Callback (clic)</span>
           <input type="text" value={props.callback} onChange={handleCallbackChange} />
+        </div>
+      )}
+
+      {('hoverColor' in props || 'hoverTextureKey' in props) && (
+        <div className="properties-panel__group">
+          <button
+            type="button"
+            className="properties-panel__group-button"
+            onClick={() => onOpenStatePreview(single)}
+          >
+            Aperçu des états
+          </button>
         </div>
       )}
 

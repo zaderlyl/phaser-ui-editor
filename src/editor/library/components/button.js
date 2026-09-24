@@ -182,6 +182,45 @@ function generateCallbackStub(name) {
   return [`  ${name}() {`, '    // TODO: implement', '  }'].join('\n')
 }
 
+// The three named states the properties panel's state-preview window can
+// force the canvas to show — always all three, since Bouton always has a
+// color for each (unlike ImageButton's opt-in textures).
+const PREVIEW_STATES = ['normal', 'hover', 'pressed']
+
+function getPreviewStates() {
+  return PREVIEW_STATES
+}
+
+// No textures involved (Bouton is all solid colors) — the state-preview
+// window's mini Phaser.Game has its own, empty texture manager separate
+// from the main editor's, so it only needs to preload anything for a
+// component that actually references texture keys (see imagebutton.js).
+function getPreviewTextures() {
+  return []
+}
+
+// Shows the button as it would look mid-interaction in the exported game
+// (the exact same color pairs generateCode wires to pointerover/
+// pointerdown) without actually exporting and clicking it — used only by
+// the properties panel's state-preview window. Purely a manual, one-off
+// override for that separate preview instance: never wired to real
+// pointer events, and never called for the live canvas's own button
+// (which stays on its normal colors — canvas clicks there still only
+// ever mean select/drag).
+function applyPreviewState(container, props, state) {
+  const background = container.getData('background')
+  const { color, strokeColor, hoverColor, hoverStrokeColor, pressedColor, pressedStrokeColor, strokeThickness } =
+    props
+  const pairs = {
+    normal: [color, strokeColor],
+    hover: [hoverColor, hoverStrokeColor],
+    pressed: [pressedColor, pressedStrokeColor],
+  }
+  const [fill, stroke] = pairs[state] ?? pairs.normal
+  background.setFillStyle(fill)
+  background.setStrokeStyle(strokeThickness, stroke)
+}
+
 export const buttonComponent = {
   type: 'button',
   label: 'Bouton',
@@ -191,4 +230,7 @@ export const buttonComponent = {
   syncVisual,
   getCallbackNames,
   generateCallbackStub,
+  getPreviewStates,
+  getPreviewTextures,
+  applyPreviewState,
 }

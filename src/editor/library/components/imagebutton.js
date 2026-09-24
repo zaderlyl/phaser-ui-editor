@@ -167,6 +167,47 @@ function generateCallbackStub(name) {
   return [`  ${name}() {`, '    // TODO: implement', '  }'].join('\n')
 }
 
+// The three named states the properties panel's state-preview window can
+// force the canvas to show — always all three (unset hover/pressed
+// textures just fall back to normal, see applyPreviewState), same set as
+// Bouton's for a consistent experience across both button types.
+const PREVIEW_STATES = ['normal', 'hover', 'pressed']
+
+function getPreviewStates() {
+  return PREVIEW_STATES
+}
+
+// Shows the button as it would look mid-interaction in the exported game
+// — the exact same texture-per-state Bouton image's own generateCode
+// wires to pointerover/pointerdown — without actually exporting and
+// clicking it. Falls back to the normal texture for hover/pressed when
+// that optional texture was never set (unlike generateCode, which then
+// just never wires that listener at all — here there's always a state to
+// show something for, even if it's "nothing configured yet"). Purely a
+// manual, one-off override for this separate preview instance: never
+// wired to real pointer events, and never called for the live canvas's
+// own button (which stays on its normal texture — canvas clicks there
+// still only ever mean select/drag).
+function applyPreviewState(image, props, state) {
+  const { textureKey, hoverTextureKey, pressedTextureKey, width, height } = props
+  const keyForState = { normal: textureKey, hover: hoverTextureKey, pressed: pressedTextureKey }
+  const key = keyForState[state] || textureKey
+  image.setTexture(key).setDisplaySize(width, height)
+}
+
+// The state-preview window's mini Phaser.Game has its own, empty texture
+// manager, separate from the main editor's — unlike Bouton's solid
+// colors, this component's whole visual IS a texture, so the preview
+// needs its own copy of whichever of the three are actually set, loaded
+// before create()/applyPreviewState ever reference their keys.
+function getPreviewTextures(props) {
+  return [
+    { key: props.textureKey, data: props.imageData },
+    { key: props.hoverTextureKey, data: props.hoverImageData },
+    { key: props.pressedTextureKey, data: props.pressedImageData },
+  ].filter((texture) => texture.key)
+}
+
 export const imageButtonComponent = {
   type: 'imagebutton',
   label: 'Bouton image',
@@ -176,4 +217,7 @@ export const imageButtonComponent = {
   isAsync: true,
   getCallbackNames,
   generateCallbackStub,
+  getPreviewStates,
+  getPreviewTextures,
+  applyPreviewState,
 }
