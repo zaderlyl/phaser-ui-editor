@@ -2,6 +2,7 @@ import { panelComponent } from './components/panel'
 import { circleComponent } from './components/circle'
 import { lineComponent } from './components/line'
 import { polygonComponent } from './components/polygon'
+import { pathComponent } from './components/path'
 import { textComponent } from './components/text'
 import { buttonComponent } from './components/button'
 import { imageComponent } from './components/image'
@@ -16,6 +17,7 @@ export const componentLibrary = [
   circleComponent,
   lineComponent,
   polygonComponent,
+  pathComponent,
   textComponent,
   buttonComponent,
   imageComponent,
