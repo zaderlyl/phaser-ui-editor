@@ -487,6 +487,73 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
+  // "Lier comme bouton" — turns 2 or 3 selected top-level elements/groups
+  // into a Bouton composé, one per named state (Normal, then Survol, then
+  // Appui, in selection order — reassignable afterwards, see the
+  // properties panel's role pickers). Reuses groupSelected's exact
+  // reparenting mechanics (world-to-local coordinate conversion before
+  // Container.add(), same caveat about it not doing that conversion
+  // itself) since adopting existing elements as children is identical
+  // either way — only the resulting element's type and props differ.
+  // Capped at 3 since statebutton.js's syncVisual only knows about three
+  // named slots; a 4th linked child would never be hidden by it and would
+  // sit on top of whichever state is "showing".
+  linkAsStates() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length < 2 || selected.length > 3) return
+
+    const bounds = this.getBoundsUnion(selected)
+
+    const container = this.add.container(bounds.left, bounds.top)
+    container.setSize(bounds.width, bounds.height)
+    container.setInteractive({ useHandCursor: true })
+    this.input.setDraggable(container)
+
+    this.typeCounters.statebutton = (this.typeCounters.statebutton ?? 0) + 1
+    const id = crypto.randomUUID()
+    container.setData('elementId', id)
+    container.setData('elementType', 'statebutton')
+
+    for (const element of selected) {
+      element.gameObject.x -= bounds.left
+      element.gameObject.y -= bounds.top
+      container.add(element.gameObject)
+      element.parentId = id
+      element.props.x = element.gameObject.x
+      element.props.y = element.gameObject.y
+    }
+
+    const [normal, hover, pressed] = selected
+    const definition = componentLibrary.find((component) => component.type === 'statebutton')
+    const stateButtonElement = {
+      id,
+      type: 'statebutton',
+      parentId: null,
+      props: {
+        ...definition.defaultProps,
+        name: `statebutton${this.typeCounters.statebutton}`,
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+        normalChildId: normal.id,
+        hoverChildId: hover?.id ?? null,
+        pressedChildId: pressed?.id ?? null,
+      },
+      gameObject: container,
+    }
+    this.elements.push(stateButtonElement)
+    this.reindexDepths()
+    this.syncCompositeVisual(stateButtonElement)
+
+    this.selectedIds = new Set([id])
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
   // Pulls one child out of its group's Container and back onto the scene
   // directly, at its current WORLD position — getBounds() already accounts
   // for the container's position *and* scale, so a child of a group that

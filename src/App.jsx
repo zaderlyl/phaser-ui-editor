@@ -62,6 +62,10 @@ function App() {
     sceneRef.current?.ungroupSelected()
   }, [])
 
+  const handleLinkAsStates = useCallback(() => {
+    sceneRef.current?.linkAsStates()
+  }, [])
+
   const handleReplaceImage = useCallback((id) => {
     sceneRef.current?.requestImageReplace(id)
   }, [])
@@ -121,6 +125,7 @@ function App() {
           onAlign={handleAlign}
           onGroup={handleGroup}
           onUngroup={handleUngroup}
+          onLinkAsStates={handleLinkAsStates}
           onReplaceImage={handleReplaceImage}
           onSetProgressBarIcon={handleSetProgressBarIcon}
           onSetImageButtonTexture={handleSetImageButtonTexture}

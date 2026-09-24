@@ -26,6 +26,7 @@ export function PropertiesPanel({
   onAlign,
   onGroup,
   onUngroup,
+  onLinkAsStates,
   onReplaceImage,
   onSetProgressBarIcon,
   onSetImageButtonTexture,
@@ -94,6 +95,15 @@ export function PropertiesPanel({
         <button type="button" className="properties-panel__group-button" onClick={onGroup}>
           Grouper (⌘G)
         </button>
+
+        {/* Bouton composé needs exactly 2 or 3 children (one per named
+            state — see statebutton.js/linkAsStates), so this is hidden
+            past that rather than shown and silently doing nothing. */}
+        {elements.length <= 3 && (
+          <button type="button" className="properties-panel__group-button" onClick={onLinkAsStates}>
+            Lier comme bouton
+          </button>
+        )}
 
         <button type="button" className="properties-panel__delete" onClick={onDeleteSelected}>
           Supprimer ({elements.length})
