@@ -356,6 +356,36 @@ export class EditorScene extends Phaser.Scene {
     })
   }
 
+  // setInteractive({ useHandCursor: true }) with no explicit hitArea makes
+  // Phaser compute one from the object's own width/height — which works
+  // fine for a Shape/Image/Text (origin 0 everywhere in this codebase, so
+  // its displayOrigin is (0,0) and the hit area lines up with the visual
+  // top-left-based bounds every other method here assumes). A Container's
+  // origin, though, is a fixed, non-configurable 0.5 regardless of
+  // setOrigin() (see groupSelected's note) — and Phaser's hit test always
+  // offsets the click point by +displayOriginX/Y before comparing it to
+  // the hitArea (Phaser.Input.InputManager.pointWithinHitArea). For a
+  // Container that silently shifts the *effective* clickable zone up-left
+  // by half its own size, so only its top-left quadrant is actually
+  // clickable — confirmed with a real repro: linking two differently-sized
+  // panels into a Bouton composé, a real click well inside the linked
+  // button's own bounds (bottom-right of it) fell through to the canvas
+  // background instead of selecting it. Passing an explicit hitArea offset
+  // by (width/2, height/2) cancels that shift back out, restoring the
+  // whole top-left-based area as clickable — verified against Phaser's own
+  // pointWithinHitArea/hitTest source, not just re-tested by guessing.
+  makeInteractive(gameObject) {
+    if (gameObject.type === 'Container') {
+      gameObject.setInteractive(
+        new Phaser.Geom.Rectangle(gameObject.width / 2, gameObject.height / 2, gameObject.width, gameObject.height),
+        Phaser.Geom.Rectangle.Contains,
+      )
+      gameObject.input.cursor = 'pointer'
+    } else {
+      gameObject.setInteractive({ useHandCursor: true })
+    }
+  }
+
   // Instantiates a real Phaser GameObject for the given library component type
   // and tracks it as an element of the current screen.
   addElement(type, props = {}) {
@@ -375,7 +405,7 @@ export class EditorScene extends Phaser.Scene {
     gameObject.setData('elementId', id)
     gameObject.setData('elementType', type)
     if (typeof gameObject.setInteractive === 'function') {
-      gameObject.setInteractive({ useHandCursor: true })
+      this.makeInteractive(gameObject)
       this.input.setDraggable(gameObject)
     }
 
@@ -449,7 +479,7 @@ export class EditorScene extends Phaser.Scene {
     // origin-based offset — verified empirically, since assuming otherwise
     // silently shifted every grouped child on first pass (see below).
     container.setSize(bounds.width, bounds.height)
-    container.setInteractive({ useHandCursor: true })
+    this.makeInteractive(container)
     this.input.setDraggable(container)
 
     this.typeCounters.group = (this.typeCounters.group ?? 0) + 1
@@ -508,7 +538,7 @@ export class EditorScene extends Phaser.Scene {
 
     const container = this.add.container(bounds.left, bounds.top)
     container.setSize(bounds.width, bounds.height)
-    container.setInteractive({ useHandCursor: true })
+    this.makeInteractive(container)
     this.input.setDraggable(container)
 
     this.typeCounters.statebutton = (this.typeCounters.statebutton ?? 0) + 1
