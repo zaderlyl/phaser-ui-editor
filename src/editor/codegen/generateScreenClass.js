@@ -1,4 +1,5 @@
 import { componentLibrary } from '../library/registry'
+import { getChildRole } from '../library/components/statebutton'
 
 // Builds the constructor line for one element by delegating to its
 // component's own generateCode(), the same way EditorScene.addElement()
@@ -63,9 +64,92 @@ function formatScale(value) {
   return Number(value.toFixed(4))
 }
 
+// Bouton composé isn't a placeable library item you can generateCode()
+// for on its own either, same reason as a group above: its actual visual
+// is 2-3 *other* elements it only stores the ids of (see statebutton.js),
+// so building its exported subtree needs this full elements list to
+// resolve them. Reuses the group branch's own child/async-ref plumbing,
+// then layers on the state-toggling every button type needs — but reading
+// which named child plays which role from getChildRole (statebutton.js)
+// and swapping *visibility between real child game objects* rather than
+// recoloring/retexturing one shared game object the way Bouton/Bouton
+// image do.
+function generateStateButtonCode(element, elements, indent) {
+  const { name, x, y, width, height, callback } = element.props
+  const containerRef = `this.${name}`
+  const children = elements.filter((child) => child.parentId === element.id)
+  const childLines = children.map((child) => generateEntryCode(child, elements, indent, containerRef))
+  const syncChildRefs = children
+    .filter((child) => !isAsyncComponent(child.type))
+    .map((child) => `this.${child.props.name}`)
+
+  const normalChild = children.find((child) => getChildRole(element.props, child.id) === 'normal')
+  const hoverChild = children.find((child) => getChildRole(element.props, child.id) === 'hover')
+  const pressedChild = children.find((child) => getChildRole(element.props, child.id) === 'pressed')
+  if (!normalChild) {
+    throw new Error(`Le bouton composé "${name}" n'a pas d'état Normal — assignez-en un avant d'exporter.`)
+  }
+
+  // Sets every linked child's visibility in one go rather than only
+  // touching the ones a given event actually changes — a pointerout while
+  // pressed (dragging off before releasing) needs to hide the pressed
+  // child too, not just re-show normal, or both would render at once;
+  // listing all three unconditionally avoids ever having to reason about
+  // what a *previous* event might have left visible.
+  const showOnly = (activeChild) =>
+    [normalChild, hoverChild, pressedChild]
+      .filter(Boolean)
+      .map((child) => `this.${child.props.name}.setVisible(${child === activeChild})`)
+      .join('; ')
+
+  const w = Math.round(width)
+  const h = Math.round(height)
+  const lines = [
+    `${indent}this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
+    ...childLines,
+  ]
+  if (syncChildRefs.length > 0) {
+    lines.push(`${indent}this.${name}.add([${syncChildRefs.join(', ')}]);`)
+  }
+  lines.push(
+    `${indent}this.${name}.setSize(${w}, ${h});`,
+    // Same fix as EditorScene.makeInteractive, reproduced here since this
+    // is standalone generated code with no scene helper to call: a
+    // Container's displayOrigin is a fixed, non-configurable 0.5, and
+    // Phaser always offsets the click point by it before testing the
+    // hitArea — plain setInteractive({useHandCursor:true}) would only
+    // make the top-left quadrant of the button actually clickable
+    // (verified against Phaser's own hit-test source).
+    `${indent}this.${name}.setInteractive(new Phaser.Geom.Rectangle(${w / 2}, ${h / 2}, ${w}, ${h}), Phaser.Geom.Rectangle.Contains);`,
+    `${indent}this.${name}.input.cursor = 'pointer';`,
+    `${indent}${showOnly(normalChild)};`,
+  )
+
+  if (hoverChild) {
+    lines.push(`${indent}this.${name}.on('pointerover', () => { ${showOnly(hoverChild)}; });`)
+  }
+  if (hoverChild || pressedChild) {
+    lines.push(`${indent}this.${name}.on('pointerout', () => { ${showOnly(normalChild)}; });`)
+  }
+  if (pressedChild) {
+    lines.push(`${indent}this.${name}.on('pointerdown', () => { ${showOnly(pressedChild)}; });`)
+  }
+  // pointerup reverts to the hover child if there is one (falling back to
+  // normal) before firing the callback — same convention as Bouton/Bouton
+  // image: releasing while still over the button should leave it looking
+  // hovered, not suddenly idle.
+  const restingChild = hoverChild ?? normalChild
+  lines.push(`${indent}this.${name}.on('pointerup', () => { ${showOnly(restingChild)}; this.${callback}(); });`)
+
+  return lines.join('\n')
+}
+
 function generateEntryCode(element, elements, indent, containerRef) {
   if (element.type === 'group') {
     return generateGroupCode(element, elements, indent)
+  }
+  if (element.type === 'statebutton') {
+    return generateStateButtonCode(element, elements, indent)
   }
   return `${indent}${generateElementCode(element, containerRef)}`
 }

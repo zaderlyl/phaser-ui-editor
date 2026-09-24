@@ -134,6 +134,22 @@ function applyPreviewState(container, props, state) {
   }
 }
 
+// Read by generateScreenClass to build the deduplicated list of stub
+// methods it appends to the class — same mechanism as Bouton's own. No
+// generateCode here, though (see generateScreenClass's own
+// generateStateButtonCode): unlike every other component, this one's
+// actual visual is 2-3 *other* elements it only references by id, so
+// building its exported subtree needs the full elements list to resolve
+// them — the same reason a group gets its own special case there instead
+// of going through the component library's generic generateCode hook.
+function getCallbackNames({ props }) {
+  return [props.callback].filter(Boolean)
+}
+
+function generateCallbackStub(name) {
+  return [`  ${name}() {`, '    // TODO: implement', '  }'].join('\n')
+}
+
 export const stateButtonComponent = {
   type: 'statebutton',
   label: 'Bouton composé',
@@ -144,4 +160,6 @@ export const stateButtonComponent = {
   getPreviewTextures,
   createPreview,
   applyPreviewState,
+  getCallbackNames,
+  generateCallbackStub,
 }
