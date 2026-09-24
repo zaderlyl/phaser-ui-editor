@@ -72,6 +72,10 @@ function App() {
     sceneRef.current?.duplicateSelected()
   }, [])
 
+  const handleActivatePathTool = useCallback(() => {
+    sceneRef.current?.startDrawingPath()
+  }, [])
+
   const handleUngroup = useCallback(() => {
     sceneRef.current?.ungroupSelected()
   }, [])
@@ -163,7 +167,7 @@ function App() {
       </header>
       <div className="app-body">
         <div className="left-sidebar">
-          <LibraryPanel />
+          <LibraryPanel onActivatePathTool={handleActivatePathTool} />
           <LayersPanel
             elements={elements}
             selectedIds={selectedElements.map((element) => element.id)}

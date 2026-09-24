@@ -62,6 +62,13 @@ export class EditorScene extends Phaser.Scene {
     this.lastSnapshot = { elements: [], selectedIds: [], enteredGroupId: null, typeCounters: {} }
     this.lastHistoryKey = null
     this.lastHistoryTime = 0
+    // Pen tool (see startDrawingPath/addPathPoint): true while placing a
+    // Tracé's points one click at a time, false the rest of the time —
+    // gameobjectdown's normal select/drag/marquee logic is suppressed
+    // entirely while this is on, since a click during drawing always means
+    // "place a point here", never "select whatever's under the cursor".
+    this.isDrawingPath = false
+    this.pathPoints = []
   }
 
   create() {
@@ -93,6 +100,14 @@ export class EditorScene extends Phaser.Scene {
     // handles so a guide is never hidden behind one.
     this.snapGuides = this.add.graphics()
     this.snapGuides.setDepth(10002)
+
+    // Pen tool's own live preview — placed points connected by solid
+    // lines, a lighter line from the last point to the current cursor
+    // position, and a small dot marking each placed point (see
+    // redrawPathPreview) — above everything else so it's never obscured
+    // by whatever's already on the canvas.
+    this.pathDrawGraphics = this.add.graphics()
+    this.pathDrawGraphics.setDepth(10003)
 
     this.resizeHandles = CORNERS.map((corner) => {
       const handle = this.add
@@ -189,6 +204,14 @@ export class EditorScene extends Phaser.Scene {
     // opens it for inline editing instead — same 300ms/same-id detection,
     // shared across every branch below rather than only the group-child one.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
+      // Pen tool active: a click anywhere (even on top of an existing
+      // element) always means "place a point here", never select/drag —
+      // handled entirely separately from the rest of this listener.
+      if (this.isDrawingPath) {
+        this.addPathPoint(pointer)
+        return
+      }
+
       if (
         gameObject.getData('isHandle') ||
         gameObject.getData('isRadiusHandle') ||
@@ -265,6 +288,14 @@ export class EditorScene extends Phaser.Scene {
       const id = this.pendingSingleSelectId
       this.pendingSingleSelectId = null
       this.selectElement(id, { additive: false })
+    })
+
+    // Pen tool's live "rubber band" segment from the last placed point to
+    // wherever the cursor currently is — 'pointermove' rather than 'drag'
+    // since there's no mouse button held down between clicks.
+    this.input.on('pointermove', (pointer) => {
+      if (!this.isDrawingPath) return
+      this.redrawPathPreview(pointer.worldX, pointer.worldY)
     })
 
     // A handle drag starts from the corner opposite the one grabbed, so that
@@ -764,6 +795,53 @@ export class EditorScene extends Phaser.Scene {
     this.drawSelection()
     this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Pen tool, step 1 of 2 (finishing/cancelling a path comes later): enters
+  // point-placement mode. The current selection is cleared first since a
+  // click while drawing means "place a point", not "select this instead".
+  startDrawingPath() {
+    this.isDrawingPath = true
+    this.pathPoints = []
+    this.deselectAll()
+    this.pathDrawGraphics.clear()
+  }
+
+  // One click = one anchor point, in world coordinates — converted to the
+  // normalized unit-box representation path.js's own props expect only
+  // once the path is finished (its bounding box isn't known until every
+  // point has been placed), so raw world coordinates are kept here in the
+  // meantime.
+  addPathPoint(pointer) {
+    this.pathPoints.push({ x: pointer.worldX, y: pointer.worldY })
+    this.redrawPathPreview(pointer.worldX, pointer.worldY)
+  }
+
+  // Solid lines between every placed point, a lighter "rubber band"
+  // segment from the last one to the cursor, and a small dot marking each
+  // placed point — purely visual, redrawn from scratch on every call
+  // (there are at most a handful of points, so no perf concern in
+  // re-issuing these draw calls on every pointermove).
+  redrawPathPreview(cursorX, cursorY) {
+    this.pathDrawGraphics.clear()
+    if (this.pathPoints.length === 0) return
+
+    this.pathDrawGraphics.lineStyle(2, SNAP_GUIDE_COLOR, 1)
+    this.pathDrawGraphics.beginPath()
+    this.pathDrawGraphics.moveTo(this.pathPoints[0].x, this.pathPoints[0].y)
+    for (const point of this.pathPoints.slice(1)) {
+      this.pathDrawGraphics.lineTo(point.x, point.y)
+    }
+    this.pathDrawGraphics.strokePath()
+
+    const last = this.pathPoints[this.pathPoints.length - 1]
+    this.pathDrawGraphics.lineStyle(1, SNAP_GUIDE_COLOR, 0.6)
+    this.pathDrawGraphics.lineBetween(last.x, last.y, cursorX, cursorY)
+
+    this.pathDrawGraphics.fillStyle(0xffffff, 1)
+    for (const point of this.pathPoints) {
+      this.pathDrawGraphics.fillCircle(point.x, point.y, 3)
+    }
   }
 
   // Bundles the currently selected top-level elements into a real Phaser
