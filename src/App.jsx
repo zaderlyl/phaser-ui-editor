@@ -66,6 +66,10 @@ function App() {
     sceneRef.current?.linkAsStates()
   }, [])
 
+  const handleAssignStateRole = useCallback((id, childId, role) => {
+    sceneRef.current?.assignStateRole(id, childId, role)
+  }, [])
+
   const handleReplaceImage = useCallback((id) => {
     sceneRef.current?.requestImageReplace(id)
   }, [])
@@ -118,6 +122,7 @@ function App() {
         </main>
         <PropertiesPanel
           elements={selectedElements}
+          allElements={elements}
           onChange={handlePropertyChange}
           onRename={handleRename}
           onDelete={handleDelete}
@@ -126,6 +131,7 @@ function App() {
           onGroup={handleGroup}
           onUngroup={handleUngroup}
           onLinkAsStates={handleLinkAsStates}
+          onAssignStateRole={handleAssignStateRole}
           onReplaceImage={handleReplaceImage}
           onSetProgressBarIcon={handleSetProgressBarIcon}
           onSetImageButtonTexture={handleSetImageButtonTexture}

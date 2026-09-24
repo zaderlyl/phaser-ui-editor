@@ -554,6 +554,29 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
+  // Reassigns which state a Bouton composé's child represents — the
+  // properties panel's per-child role picker, for correcting/changing the
+  // Normal/Survol/Appui order linkAsStates only guessed from selection
+  // order. A child can only ever hold one role at a time, so it's cleared
+  // from whichever slot it already occupied before (if any) the new one
+  // is applied — 'none' alone just does that clearing, unassigning it.
+  assignStateRole(id, childId, role) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'statebutton') return
+    if (!this.elements.some((el) => el.id === childId && el.parentId === id)) return
+
+    const roleKeys = { normal: 'normalChildId', hover: 'hoverChildId', pressed: 'pressedChildId' }
+    for (const key of Object.values(roleKeys)) {
+      if (element.props[key] === childId) element.props[key] = null
+    }
+    const key = roleKeys[role]
+    if (key) element.props[key] = childId
+
+    this.syncCompositeVisual(element)
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
   // Pulls one child out of its group's Container and back onto the scene
   // directly, at its current WORLD position — getBounds() already accounts
   // for the container's position *and* scale, so a child of a group that

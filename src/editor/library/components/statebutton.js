@@ -40,19 +40,23 @@ function create(scene, props) {
   return container
 }
 
-// Shows only the child assigned to normalChildId, hiding whichever others
-// are linked — the live canvas never simulates hover/pressed (a click
+// Shows only the child assigned to normalChildId, hiding every other
+// child of this container — including one with no role assigned at all
+// (see EditorScene.assignStateRole's "Aucun" option), not just the other
+// named slots — the live canvas never simulates hover/pressed (a click
 // there always means select/drag, same rule as every other button type),
-// so the resting state is always what's visible while editing. Needs the
-// scene to resolve child ids to their actual game objects, same reason
-// progressbar.js's icon-slot syncVisual receives it as a third argument.
+// so the resting state is always what's visible while editing. Looks
+// children up by parentId rather than iterating the three named props
+// directly so a not-yet-assigned child is never left visible alongside
+// the real normal state. Needs the scene to resolve the container's own
+// element id and its children, same reason progressbar.js's icon-slot
+// syncVisual receives it as a third argument.
 function syncVisual(container, props, scene) {
   if (!scene) return
-  const { normalChildId, hoverChildId, pressedChildId } = props
-  for (const childId of [normalChildId, hoverChildId, pressedChildId]) {
-    if (!childId) continue
-    const child = scene.elements.find((element) => element.id === childId)
-    if (child) child.gameObject.setVisible(childId === normalChildId)
+  const containerId = container.getData('elementId')
+  for (const child of scene.elements) {
+    if (child.parentId !== containerId) continue
+    child.gameObject.setVisible(child.id === props.normalChildId)
   }
 }
 

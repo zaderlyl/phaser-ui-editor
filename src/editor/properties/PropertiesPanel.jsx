@@ -19,6 +19,7 @@ function hexToColorNumber(hex) {
 // elements yet.
 export function PropertiesPanel({
   elements,
+  allElements,
   onChange,
   onRename,
   onDelete,
@@ -27,6 +28,7 @@ export function PropertiesPanel({
   onGroup,
   onUngroup,
   onLinkAsStates,
+  onAssignStateRole,
   onReplaceImage,
   onSetProgressBarIcon,
   onSetImageButtonTexture,
@@ -268,6 +270,41 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Callback (clic)</span>
           <input type="text" value={props.callback} onChange={handleCallbackChange} />
+        </div>
+      )}
+
+      {/* Bouton composé only: linkAsStates guessed Normal/Survol/Appui
+          from selection order — this lets a créa see and correct that
+          per child, or unassign one ("Aucun") without unlinking it. */}
+      {'normalChildId' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">États liés</span>
+          {(allElements ?? [])
+            .filter((element) => element.parentId === id)
+            .map((child) => {
+              const currentRole =
+                props.normalChildId === child.id
+                  ? 'normal'
+                  : props.hoverChildId === child.id
+                    ? 'hover'
+                    : props.pressedChildId === child.id
+                      ? 'pressed'
+                      : 'none'
+              return (
+                <div key={child.id} className="properties-panel__row">
+                  <span>{child.props.name}</span>
+                  <select
+                    value={currentRole}
+                    onChange={(event) => onAssignStateRole(id, child.id, event.target.value)}
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="hover">Survol</option>
+                    <option value="pressed">Appui</option>
+                    <option value="none">Aucun</option>
+                  </select>
+                </div>
+              )
+            })}
         </div>
       )}
 
