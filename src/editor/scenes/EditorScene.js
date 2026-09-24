@@ -108,6 +108,39 @@ export class EditorScene extends Phaser.Scene {
     this.radiusHandle.input.enabled = false
     this.input.setDraggable(this.radiusHandle)
 
+    // A small connector handle for building a Bouton composé by direct
+    // manipulation — drag it onto another top-level element to link the
+    // two (source becomes Normal, target Survol/Appui — see
+    // connectAsStates), or onto/from an existing Bouton composé to add
+    // another state to it — instead of multi-select + "Lier comme
+    // bouton". Round and in an accent color so it reads distinct from the
+    // white resize/radius handles at a glance. Only shown for a single
+    // top-level selection (see drawSelection) — linking is always FROM
+    // one specific element, so a multi-selection has no unambiguous
+    // source.
+    this.linkHandle = this.add
+      .circle(0, 0, HANDLE_SIZE / 2 + 1, 0x8b5cf6)
+      .setStrokeStyle(1, 0xffffff)
+      .setDepth(10001)
+      .setVisible(false)
+    this.linkHandle.setData('isLinkHandle', true)
+    {
+      const hitSize = HANDLE_SIZE + HANDLE_HIT_PADDING * 2
+      this.linkHandle.setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(-hitSize / 2, -hitSize / 2, hitSize, hitSize),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        useHandCursor: true,
+      })
+    }
+    this.linkHandle.input.enabled = false
+    this.input.setDraggable(this.linkHandle)
+
+    // The live line drawn from the handle to the pointer while dragging
+    // it, plus a highlight around whatever valid drop target is currently
+    // under the pointer — cleared on drop (see finishLinkDrag).
+    this.linkDragGraphics = this.add.graphics()
+    this.linkDragGraphics.setDepth(10002)
+
     // Clicking an element selects it (shift adds/removes it from the current
     // selection instead of replacing it); clicking anything else (background)
     // clears the selection, unless shift is held — a shift-click on empty
@@ -124,7 +157,12 @@ export class EditorScene extends Phaser.Scene {
     // opens it for inline editing instead — same 300ms/same-id detection,
     // shared across every branch below rather than only the group-child one.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
-      if (gameObject.getData('isHandle') || gameObject.getData('isRadiusHandle')) return
+      if (
+        gameObject.getData('isHandle') ||
+        gameObject.getData('isRadiusHandle') ||
+        gameObject.getData('isLinkHandle')
+      )
+        return
 
       const additive = !!pointer.event?.shiftKey
       const elementId = gameObject.getData('elementId')
@@ -187,6 +225,15 @@ export class EditorScene extends Phaser.Scene {
         if (elements.length !== 1) return
         this.radiusDragElement = elements[0]
         this.radiusDragBounds = elements[0].gameObject.getBounds()
+        return
+      }
+
+      if (gameObject.getData('isLinkHandle')) {
+        const elements = this.elements.filter(
+          (el) => this.selectedIds.has(el.id) && !el.parentId,
+        )
+        if (elements.length !== 1) return
+        this.linkDragSourceId = elements[0].id
         return
       }
 
@@ -258,6 +305,11 @@ export class EditorScene extends Phaser.Scene {
         return
       }
 
+      if (gameObject.getData('isLinkHandle')) {
+        this.updateLinkDrag(pointer)
+        return
+      }
+
       if (gameObject.getData('isHandle')) {
         this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey)
         return
@@ -307,11 +359,16 @@ export class EditorScene extends Phaser.Scene {
       this.drawSelection()
     })
 
-    this.input.on('dragend', (_pointer, gameObject) => {
+    this.input.on('dragend', (pointer, gameObject) => {
       this.groupDragRedirect = null
       if (gameObject === this.background) {
         this.marqueeGraphics.clear()
         this.marqueeStart = null
+        return
+      }
+
+      if (gameObject.getData('isLinkHandle')) {
+        this.finishLinkDrag(pointer)
         return
       }
       // Every other drag (element move, group move, resize) touched
@@ -517,30 +574,23 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
-  // "Lier comme bouton" — turns 2 or 3 selected top-level elements/groups
-  // into a Bouton composé, one per named state (Normal, then Survol, then
-  // Appui, in selection order — reassignable afterwards, see the
-  // properties panel's role pickers). Every state overlays the exact same
-  // spot — Normal's own position, wherever that happened to be drawn —
-  // rather than each keeping its original offset the way a plain group's
-  // reparenting does (see groupSelected): a créa sketches variants
-  // anywhere on the canvas (or already stacked), the same way a Figma
-  // component's variants don't have to sit where an instance of it ends
-  // up. The button's own hit area covers the *largest* linked element,
-  // not just Normal's, so a bigger Survol/Appui isn't visually clipped.
-  // Capped at 3 since statebutton.js's syncVisual only knows about three
-  // named slots; a 4th linked child would never be hidden by it and would
-  // sit on top of whichever state is "showing".
-  linkAsStates() {
-    const selected = this.elements.filter(
-      (element) => this.selectedIds.has(element.id) && !element.parentId,
-    )
-    if (selected.length < 2 || selected.length > 3) return
-
-    const [normal, hover, pressed] = selected
+  // Shared by linkAsStates (order = selection/array order) and the
+  // interaction-arrow's connectAsStates (order = drag direction, source
+  // first) — builds a Bouton composé from 2-3 already-ordered elements
+  // (first = Normal, second = Survol, third = Appui). Every state
+  // overlays the exact same spot — Normal's own position, wherever that
+  // happened to be drawn — rather than each keeping its original offset
+  // the way a plain group's reparenting does (see groupSelected): a créa
+  // sketches variants anywhere on the canvas (or already stacked), the
+  // same way a Figma component's variants don't have to sit where an
+  // instance of it ends up. The button's own hit area covers the
+  // *largest* linked element, not just Normal's, so a bigger Survol/Appui
+  // isn't visually clipped.
+  createStateButtonFromElements(orderedElements) {
+    const [normal, hover, pressed] = orderedElements
     const anchor = normal.gameObject.getBounds()
-    const width = Math.max(...selected.map((element) => element.gameObject.getBounds().width))
-    const height = Math.max(...selected.map((element) => element.gameObject.getBounds().height))
+    const width = Math.max(...orderedElements.map((element) => element.gameObject.getBounds().width))
+    const height = Math.max(...orderedElements.map((element) => element.gameObject.getBounds().height))
 
     const container = this.add.container(anchor.left, anchor.top)
     container.setSize(width, height)
@@ -552,7 +602,7 @@ export class EditorScene extends Phaser.Scene {
     container.setData('elementId', id)
     container.setData('elementType', 'statebutton')
 
-    for (const element of selected) {
+    for (const element of orderedElements) {
       // (0, 0) local, always — not offset by wherever it used to sit on
       // the canvas (contrast groupSelected's world-to-local conversion),
       // since every linked state is an interchangeable view of this one
@@ -591,6 +641,44 @@ export class EditorScene extends Phaser.Scene {
     this.drawSelection()
     this.events.emit('elementsChange', this.getElementsSnapshot())
     this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // "Lier comme bouton" — turns 2 or 3 selected top-level elements/groups
+  // into a Bouton composé, one per named state (Normal, then Survol, then
+  // Appui, in selection order — reassignable afterwards, see the
+  // properties panel's role pickers). Capped at 3 since statebutton.js's
+  // syncVisual only knows about three named slots; a 4th linked child
+  // would never be hidden by it and would sit on top of whichever state
+  // is "showing".
+  linkAsStates() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length < 2 || selected.length > 3) return
+    this.createStateButtonFromElements(selected)
+  }
+
+  // The interaction-arrow's drop handler (see the link handle wired in
+  // create()/finishLinkDrag): links whatever was dragged from (source) to
+  // whatever it was dropped on (target), direction-aware unlike
+  // linkAsStates' own array-order guess — dragging FROM an element always
+  // makes it Normal, since that's the one the créa is pointing away from.
+  // Either side already being a Bouton composé just adds the other one in
+  // (see addChildToStateButton) rather than nesting a button inside a
+  // button; two plain elements build a fresh one.
+  connectAsStates(sourceId, targetId) {
+    if (sourceId === targetId) return
+    const source = this.elements.find((element) => element.id === sourceId && !element.parentId)
+    const target = this.elements.find((element) => element.id === targetId && !element.parentId)
+    if (!source || !target) return
+
+    if (source.type === 'statebutton') {
+      this.addChildToStateButton(source.id, target.id)
+    } else if (target.type === 'statebutton') {
+      this.addChildToStateButton(target.id, source.id)
+    } else {
+      this.createStateButtonFromElements([source, target])
+    }
   }
 
   // Reassigns which state a Bouton composé's child represents — the
@@ -1492,6 +1580,8 @@ export class EditorScene extends Phaser.Scene {
       this.setHandlesVisible(false)
       this.radiusHandle.setVisible(false)
       this.radiusHandle.input.enabled = false
+      this.linkHandle.setVisible(false)
+      this.linkHandle.input.enabled = false
       return
     }
 
@@ -1500,6 +1590,8 @@ export class EditorScene extends Phaser.Scene {
       this.setHandlesVisible(false)
       this.radiusHandle.setVisible(false)
       this.radiusHandle.input.enabled = false
+      this.linkHandle.setVisible(false)
+      this.linkHandle.input.enabled = false
       return
     }
 
@@ -1523,6 +1615,20 @@ export class EditorScene extends Phaser.Scene {
     )
     this.positionHandles(groupBounds)
     this.setHandlesVisible(true)
+
+    // Only for a single top-level selection — linking is always FROM one
+    // specific element, so a multi-selection (or a grouped child, which
+    // can't itself become a state's source/target) has no unambiguous
+    // source. Placed above-right of the bounding box, clear of the
+    // resize handle sitting right on that same corner.
+    if (selected.length === 1 && !selected[0].parentId) {
+      this.linkHandle.setPosition(groupBounds.right + 12, groupBounds.top - 12)
+      this.linkHandle.setVisible(true)
+      this.linkHandle.input.enabled = true
+    } else {
+      this.linkHandle.setVisible(false)
+      this.linkHandle.input.enabled = false
+    }
 
     // Only makes sense for a single selected element that actually
     // declares a cornerRadius prop (generic check, like syncCompositeVisual
@@ -1558,6 +1664,71 @@ export class EditorScene extends Phaser.Scene {
     for (const handle of this.resizeHandles) {
       handle.setVisible(visible)
       handle.input.enabled = visible
+    }
+  }
+
+  // Topmost top-level element whose bounds contain the given world point,
+  // excluding one id (the drag's own source, so it's never its own drop
+  // target). Iterates back-to-front through this.elements in reverse,
+  // approximating paint order the same way reindexDepths' index-as-depth
+  // scheme establishes it — good enough for a drop target, unlike Phaser's
+  // own hit-test system, which is only driven by *its own* interactive
+  // objects and won't fire against arbitrary elements mid-drag of the
+  // (separate) link handle.
+  findTopLevelElementAt(x, y, excludeId) {
+    for (let i = this.elements.length - 1; i >= 0; i--) {
+      const element = this.elements[i]
+      if (element.parentId || element.id === excludeId) continue
+      const bounds = element.gameObject.getBounds()
+      if (x >= bounds.left && x <= bounds.right && y >= bounds.top && y <= bounds.bottom) {
+        return element
+      }
+    }
+    return null
+  }
+
+  // Redraws the link handle's drag: a line from the source's own bounds
+  // to the pointer, plus a highlight around whatever valid drop target is
+  // currently under it — purely visual feedback, the actual link only
+  // happens on drop (see finishLinkDrag).
+  updateLinkDrag(pointer) {
+    const source = this.elements.find((element) => element.id === this.linkDragSourceId)
+    if (!source) return
+
+    const bounds = source.gameObject.getBounds()
+    this.linkDragGraphics.clear()
+    this.linkDragGraphics.lineStyle(2, 0x8b5cf6, 1)
+    this.linkDragGraphics.lineBetween(bounds.right, bounds.top, pointer.worldX, pointer.worldY)
+
+    const target = this.findTopLevelElementAt(pointer.worldX, pointer.worldY, source.id)
+    if (target) {
+      const targetBounds = target.gameObject.getBounds()
+      this.linkDragGraphics.lineStyle(2, 0x22c55e, 1)
+      this.linkDragGraphics.strokeRect(
+        targetBounds.left,
+        targetBounds.top,
+        targetBounds.width,
+        targetBounds.height,
+      )
+    }
+  }
+
+  // Drop: links the drag's source to whatever's under the pointer, if
+  // anything valid is (see connectAsStates) — otherwise just cancels,
+  // same as dropping a drag-and-drop file outside a valid target. Either
+  // way the drag graphics always clear and the source's own selection
+  // handles come back via drawSelection.
+  finishLinkDrag(pointer) {
+    const sourceId = this.linkDragSourceId
+    this.linkDragSourceId = null
+    this.linkDragGraphics.clear()
+    if (!sourceId) return
+
+    const target = this.findTopLevelElementAt(pointer.worldX, pointer.worldY, sourceId)
+    if (target) {
+      this.connectAsStates(sourceId, target.id)
+    } else {
+      this.drawSelection()
     }
   }
 }
