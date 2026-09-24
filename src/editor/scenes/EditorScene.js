@@ -779,13 +779,17 @@ export class EditorScene extends Phaser.Scene {
   // to open its (already-existing, from the initial-import flow) hidden
   // file input, remembering *this* element's id so the eventual file
   // ends up calling replaceImage() instead of creating a new element.
+  // Generic on 'textureKey' in props (not hardcoded to the 'image' type)
+  // since the properties panel's button is gated the same generic way —
+  // Bouton image shares that same prop name, and any future component
+  // that declares it gets a working "Changer l'image" for free too.
   requestImageReplace(id) {
     const element = this.elements.find((el) => el.id === id)
-    if (!element || element.type !== 'image') return
+    if (!element || !('textureKey' in element.props)) return
     this.events.emit('requestimagereplace', { id })
   }
 
-  // Swaps an existing image element's picture without touching its
+  // Swaps an existing image-based element's picture without touching its
   // position or on-canvas size — setTexture() alone would reset the
   // display size to the new picture's own native dimensions, so
   // setDisplaySize() is reapplied right after with the size the element
@@ -793,7 +797,7 @@ export class EditorScene extends Phaser.Scene {
   // image, is keeping the same frame and swapping what's inside it).
   replaceImage(id, { textureKey, imageData }) {
     const element = this.elements.find((el) => el.id === id)
-    if (!element || element.type !== 'image') return
+    if (!element || !('textureKey' in element.props)) return
 
     element.gameObject.setTexture(textureKey)
     element.gameObject.setDisplaySize(element.props.width, element.props.height)
@@ -827,6 +831,32 @@ export class EditorScene extends Phaser.Scene {
     this.syncCompositeVisual(element)
 
     this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+  }
+
+  // Same event-delegation pattern as requestImageReplace/
+  // requestProgressBarIcon, for Bouton image's "Choisir l'image (survol/
+  // appui)" buttons — slot is 'hover' or 'pressed', matching the
+  // hoverTextureKey/pressedTextureKey prop names (see imagebutton.js).
+  requestImageButtonTexture(id, slot) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'imagebutton') return
+    this.events.emit('requestimagebuttontexture', { id, slot })
+  }
+
+  // Sets one of Bouton image's optional alternate textures. Unlike
+  // ProgressBar's icon slots, this needs no live visual sync at all — the
+  // editor canvas never shows a hover/pressed state (a click or hover
+  // there only ever means select/drag/resize), only the exported code's
+  // real pointerover/pointerdown listeners do.
+  setImageButtonTexture(id, slot, { textureKey, imageData }) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'imagebutton') return
+
+    element.props[`${slot}TextureKey`] = textureKey
+    element.props[`${slot}ImageData`] = imageData
+
     this.events.emit('elementchange', this.getElementSnapshot(id))
     this.events.emit('elementsChange', this.getElementsSnapshot())
   }

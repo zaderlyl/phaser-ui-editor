@@ -1,0 +1,84 @@
+.state-preview-modal__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.state-preview-modal {
+  display: flex;
+  flex-direction: column;
+  background: #14161c;
+  border: 1px solid #2a2d38;
+  border-radius: 8px;
+  padding: 1rem;
+  box-sizing: border-box;
+}
+
+.state-preview-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+}
+
+.state-preview-modal__close {
+  background: transparent;
+  border: none;
+  color: #9ca3af;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.state-preview-modal__close:hover {
+  color: #e5e7eb;
+}
+
+.state-preview-modal__canvas {
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  overflow: hidden;
+  line-height: 0;
+}
+
+.state-preview-modal__nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 0.75rem;
+}
+
+.state-preview-modal__nav button {
+  padding: 0.4rem 0.75rem;
+  background: #1d1f27;
+  border: 1px solid #2a2d38;
+  border-radius: 4px;
+  color: #e5e7eb;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.state-preview-modal__nav button:hover:not(:disabled) {
+  background: #262933;
+}
+
+.state-preview-modal__nav button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.state-preview-modal__state-label {
+  min-width: 5rem;
+  text-align: center;
+  color: #e5e7eb;
+  font-size: 0.85rem;
+}

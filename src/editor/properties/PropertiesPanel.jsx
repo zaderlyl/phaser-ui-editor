@@ -28,6 +28,8 @@ export function PropertiesPanel({
   onUngroup,
   onReplaceImage,
   onSetProgressBarIcon,
+  onSetImageButtonTexture,
+  onOpenStatePreview,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -256,6 +258,18 @@ export function PropertiesPanel({
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Callback (clic)</span>
           <input type="text" value={props.callback} onChange={handleCallbackChange} />
+        </div>
+      )}
+
+      {('hoverColor' in props || 'hoverTextureKey' in props) && (
+        <div className="properties-panel__group">
+          <button
+            type="button"
+            className="properties-panel__group-button"
+            onClick={() => onOpenStatePreview(single)}
+          >
+            Aperçu des états
+          </button>
         </div>
       )}
 
@@ -741,6 +755,24 @@ export function PropertiesPanel({
               />
             </label>
           </div>
+        </div>
+      )}
+
+      {'hoverTextureKey' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Image (survol)</span>
+          <button type="button" onClick={() => onSetImageButtonTexture(id, 'hover')}>
+            {props.hoverTextureKey ? "Changer l'image (survol)" : "Choisir l'image (survol)"}
+          </button>
+        </div>
+      )}
+
+      {'pressedTextureKey' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Image (appui)</span>
+          <button type="button" onClick={() => onSetImageButtonTexture(id, 'pressed')}>
+            {props.pressedTextureKey ? "Changer l'image (appui)" : "Choisir l'image (appui)"}
+          </button>
         </div>
       )}
 

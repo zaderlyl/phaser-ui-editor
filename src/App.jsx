@@ -4,6 +4,7 @@ import { LibraryPanel } from './editor/library/LibraryPanel'
 import { LayersPanel } from './editor/layers/LayersPanel'
 import { PropertiesPanel } from './editor/properties/PropertiesPanel'
 import { ExportModal } from './editor/export/ExportModal'
+import { StatePreviewModal } from './editor/preview/StatePreviewModal'
 import './App.css'
 
 function App() {
@@ -12,6 +13,10 @@ function App() {
   const [selectedElements, setSelectedElements] = useState([])
   const [elements, setElements] = useState([])
   const [isExportOpen, setExportOpen] = useState(false)
+  // The specific element to preview, snapshotted at the moment "Aperçu
+  // des états" was clicked — not just "the current selection", since the
+  // selection could change while the modal stays open.
+  const [previewElement, setPreviewElement] = useState(null)
 
   const handleSceneReady = useCallback((scene) => {
     sceneRef.current = scene
@@ -65,6 +70,14 @@ function App() {
     sceneRef.current?.requestProgressBarIcon(id, slot)
   }, [])
 
+  const handleSetImageButtonTexture = useCallback((id, slot) => {
+    sceneRef.current?.requestImageButtonTexture(id, slot)
+  }, [])
+
+  const handleOpenStatePreview = useCallback((element) => {
+    setPreviewElement(element)
+  }, [])
+
   // Live position/size/name updates from a single-element drag, resize or
   // rename (see EditorScene's 'elementchange') only ever concern the one
   // element currently selected, so just refresh it in place.
@@ -110,10 +123,15 @@ function App() {
           onUngroup={handleUngroup}
           onReplaceImage={handleReplaceImage}
           onSetProgressBarIcon={handleSetProgressBarIcon}
+          onSetImageButtonTexture={handleSetImageButtonTexture}
+          onOpenStatePreview={handleOpenStatePreview}
         />
       </div>
 
       {isExportOpen && <ExportModal elements={elements} onClose={() => setExportOpen(false)} />}
+      {previewElement && (
+        <StatePreviewModal element={previewElement} onClose={() => setPreviewElement(null)} />
+      )}
     </div>
   )
 }

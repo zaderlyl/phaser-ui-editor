@@ -20,10 +20,10 @@ export function PhaserCanvas({
   const gameRef = useRef(null)
   const sceneRef = useRef(null)
   const fileInputRef = useRef(null)
-  // Where to place the image once a file is actually chosen — Image has
-  // no sensible default content, so unlike every other component, its
-  // drop doesn't call addElement() directly (see handleDrop/
-  // handleImageFileChange below).
+  // { x, y, type } for where to place an image-based element once a file
+  // is actually chosen — Image and Bouton image have no sensible default
+  // content, so unlike every other component, their drop doesn't call
+  // addElement() directly (see handleDrop/handleImageFileChange below).
   const pendingImageDropRef = useRef(null)
   // The id of an existing image element to replace instead of placing a
   // new one, set by the 'requestimagereplace' listener below (see the
@@ -35,6 +35,9 @@ export function PhaserCanvas({
   // different eventual scene call (setProgressBarIcon instead of
   // replaceImage).
   const pendingProgressBarIconRef = useRef(null)
+  // { id, slot } for a Bouton image's "Choisir l'image (survol/appui)"
+  // button — same idea, calling setImageButtonTexture instead.
+  const pendingImageButtonTextureRef = useRef(null)
   // Double-clicking a text element (see EditorScene's 'starttextedit')
   // opens this <textarea> overlay positioned right on top of it — Phaser
   // itself has no text input, so editing happens in real DOM instead, and
@@ -97,6 +100,10 @@ export function PhaserCanvas({
         pendingProgressBarIconRef.current = { id, slot }
         fileInputRef.current?.click()
       })
+      scene.events.on('requestimagebuttontexture', ({ id, slot }) => {
+        pendingImageButtonTextureRef.current = { id, slot }
+        fileInputRef.current?.click()
+      })
       onSceneReady?.(scene)
     })
 
@@ -132,12 +139,12 @@ export function PhaserCanvas({
     const x = (event.clientX - rect.left) * scaleX
     const y = (event.clientY - rect.top) * scaleY
 
-    if (type === 'image') {
+    if (type === 'image' || type === 'imagebutton') {
       // No sensible default content to place immediately — remember
-      // where the drop happened and ask for a file instead; the element
-      // is only created once handleImageFileChange's texture actually
-      // finishes loading.
-      pendingImageDropRef.current = { x, y }
+      // where the drop happened (and which of the two this is) and ask
+      // for a file instead; the element is only created once
+      // handleImageFileChange's texture actually finishes loading.
+      pendingImageDropRef.current = { x, y, type }
       fileInputRef.current?.click()
       return
     }
@@ -157,11 +164,13 @@ export function PhaserCanvas({
     const drop = pendingImageDropRef.current
     const replaceId = pendingImageReplaceRef.current
     const progressBarIcon = pendingProgressBarIconRef.current
+    const imageButtonTexture = pendingImageButtonTextureRef.current
     pendingImageDropRef.current = null
     pendingImageReplaceRef.current = null
     pendingProgressBarIconRef.current = null
+    pendingImageButtonTextureRef.current = null
     event.target.value = '' // otherwise re-picking the same file wouldn't fire onChange again
-    if (!file || (!drop && !replaceId && !progressBarIcon)) return
+    if (!file || (!drop && !replaceId && !progressBarIcon && !imageButtonTexture)) return
 
     const scene = sceneRef.current
     if (!scene) return
@@ -191,12 +200,20 @@ export function PhaserCanvas({
           return
         }
 
+        if (imageButtonTexture) {
+          scene.setImageButtonTexture(imageButtonTexture.id, imageButtonTexture.slot, {
+            textureKey,
+            imageData: dataUrl,
+          })
+          return
+        }
+
         const source = scene.textures.get(textureKey).getSourceImage()
         const scale = Math.min(1, MAX_INITIAL_IMAGE_DIMENSION / Math.max(source.width, source.height))
         const width = Math.round(source.width * scale)
         const height = Math.round(source.height * scale)
 
-        const element = scene.addElement('image', {
+        const element = scene.addElement(drop.type, {
           x: drop.x,
           y: drop.y,
           width,
