@@ -765,6 +765,45 @@ export function PropertiesPanel({
         </div>
       )}
 
+      {'sides' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Côtés</span>
+          <input
+            type="number"
+            min="3"
+            value={props.sides}
+            onChange={handleNumberChange('sides')}
+          />
+        </div>
+      )}
+
+      {'isStar' in props && (
+        <div className="properties-panel__group">
+          <label className="properties-panel__checkbox">
+            <input
+              type="checkbox"
+              checked={props.isStar}
+              onChange={handleCheckboxChange('isStar')}
+            />
+            Étoile
+          </label>
+        </div>
+      )}
+
+      {'innerRadiusRatio' in props && props.isStar && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Rayon interne</span>
+          <input
+            type="number"
+            min="0.1"
+            max="0.9"
+            step="0.05"
+            value={props.innerRadiusRatio}
+            onChange={handleNumberChange('innerRadiusRatio')}
+          />
+        </div>
+      )}
+
       {'segments' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Segments</span>
