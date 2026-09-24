@@ -14,6 +14,12 @@ const CORNERS = ['tl', 'tr', 'bl', 'br']
 // Matches a valid JS identifier — the generated code will use this name
 // directly as a property (this.<name>), so it must be a legal one.
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+// How close (world pixels) a dragged edge/center needs to land next to
+// another element's own edge/center before it snaps to it — small enough
+// to stay out of the way at normal cursor precision, big enough to
+// actually catch an intended alignment.
+const SNAP_THRESHOLD = 6
+const SNAP_GUIDE_COLOR = 0xff2fd6
 // How many undo steps to keep — old enough entries just fall off rather
 // than growing the stack forever.
 const MAX_HISTORY = 100
@@ -81,6 +87,12 @@ export class EditorScene extends Phaser.Scene {
     this.marqueeGraphics = this.add.graphics()
     this.marqueeGraphics.setDepth(9999)
     this.marqueeStart = null
+
+    // Alignment guides while dragging a single element (see computeSnap/
+    // the 'drag' handler's single-element branch) — above the resize
+    // handles so a guide is never hidden behind one.
+    this.snapGuides = this.add.graphics()
+    this.snapGuides.setDepth(10002)
 
     this.resizeHandles = CORNERS.map((corner) => {
       const handle = this.add
@@ -315,6 +327,12 @@ export class EditorScene extends Phaser.Scene {
     })
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+      // Cleared unconditionally up front and only ever redrawn by the
+      // single-element move branch below — every other branch just
+      // leaves it cleared, so switching to a different kind of drag (or
+      // ending one) never leaves a stale guide on screen.
+      this.snapGuides.clear()
+
       if (gameObject === this.background) {
         this.updateMarqueeSelection(pointer.x, pointer.y)
         return
@@ -367,12 +385,16 @@ export class EditorScene extends Phaser.Scene {
           el.props.y = el.gameObject.y
         }
       } else {
-        // Single element: keeps its stored props (and the properties panel,
-        // via 'elementchange') in sync with its actual position live.
-        gameObject.x = dragX
-        gameObject.y = dragY
-        element.props.x = dragX
-        element.props.y = dragY
+        // Single element: snap its candidate position against every other
+        // top-level element's own edges/center first (see computeSnap),
+        // then keep its stored props (and the properties panel, via
+        // 'elementchange') in sync with wherever it actually landed.
+        const snapped = this.computeSnap(elementId, element.props.width, element.props.height, dragX, dragY)
+        gameObject.x = snapped.x
+        gameObject.y = snapped.y
+        element.props.x = snapped.x
+        element.props.y = snapped.y
+        this.drawSnapGuides(snapped.guides)
         this.events.emit('elementchange', this.getElementSnapshot(elementId))
       }
 
@@ -381,6 +403,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.input.on('dragend', (pointer, gameObject) => {
       this.groupDragRedirect = null
+      this.snapGuides.clear()
       if (gameObject === this.background) {
         this.marqueeGraphics.clear()
         this.marqueeStart = null
@@ -1831,6 +1854,86 @@ export class EditorScene extends Phaser.Scene {
     const top = Math.min(...boundsList.map((bounds) => bounds.top))
     const bottom = Math.max(...boundsList.map((bounds) => bounds.bottom))
     return { left, right, top, bottom, width: right - left, height: bottom - top }
+  }
+
+  // Alignment guides/snapping for a single-element drag (see the 'drag'
+  // handler's own single-element branch — resize, group drag and multi-
+  // selection aren't covered yet, kept out of this first pass on purpose).
+  // (candidateX, candidateY) is where the element's top-left is *about* to
+  // move to, before it's actually applied — width/height come from props
+  // rather than a live gameObject.getBounds() since the object hasn't
+  // moved there yet. Checks the dragged element's left/center/right (and
+  // top/middle/bottom) against every other top-level element's own three
+  // lines per axis, independently for X and Y, and snaps to the closest
+  // match within SNAP_THRESHOLD on each axis — so a drag can snap
+  // horizontally to one element and vertically to a completely different
+  // one at the same time, same as Figma. Returns the possibly-adjusted
+  // position plus the guide lines to draw for whatever actually matched.
+  computeSnap(excludeId, width, height, candidateX, candidateY) {
+    const others = this.elements.filter((element) => !element.parentId && element.id !== excludeId)
+    if (others.length === 0) return { x: candidateX, y: candidateY, guides: [] }
+
+    const xLines = [candidateX, candidateX + width / 2, candidateX + width]
+    const yLines = [candidateY, candidateY + height / 2, candidateY + height]
+
+    let bestXDelta = null
+    let bestXGuide = null
+    let bestYDelta = null
+    let bestYGuide = null
+
+    for (const other of others) {
+      const bounds = other.gameObject.getBounds()
+      const otherXLines = [bounds.left, bounds.centerX, bounds.right]
+      const otherYLines = [bounds.top, bounds.centerY, bounds.bottom]
+
+      for (const line of xLines) {
+        for (const otherLine of otherXLines) {
+          const delta = otherLine - line
+          if (Math.abs(delta) < SNAP_THRESHOLD && (bestXDelta === null || Math.abs(delta) < Math.abs(bestXDelta))) {
+            bestXDelta = delta
+            bestXGuide = otherLine
+          }
+        }
+      }
+      for (const line of yLines) {
+        for (const otherLine of otherYLines) {
+          const delta = otherLine - line
+          if (Math.abs(delta) < SNAP_THRESHOLD && (bestYDelta === null || Math.abs(delta) < Math.abs(bestYDelta))) {
+            bestYDelta = delta
+            bestYGuide = otherLine
+          }
+        }
+      }
+    }
+
+    const guides = []
+    if (bestXGuide !== null) guides.push({ axis: 'x', value: bestXGuide })
+    if (bestYGuide !== null) guides.push({ axis: 'y', value: bestYGuide })
+
+    return {
+      x: candidateX + (bestXDelta ?? 0),
+      y: candidateY + (bestYDelta ?? 0),
+      guides,
+    }
+  }
+
+  // Draws whatever guide lines computeSnap found — a full-canvas line
+  // through the matched coordinate, same convention as Figma's own smart
+  // guides (simpler than trying to span exactly between the two shapes,
+  // and just as clear about *what* lined up).
+  drawSnapGuides(guides) {
+    this.snapGuides.clear()
+    if (guides.length === 0) return
+
+    const { width, height } = this.scale
+    this.snapGuides.lineStyle(1, SNAP_GUIDE_COLOR, 1)
+    for (const guide of guides) {
+      if (guide.axis === 'x') {
+        this.snapGuides.lineBetween(guide.value, 0, guide.value, height)
+      } else {
+        this.snapGuides.lineBetween(0, guide.value, width, guide.value)
+      }
+    }
   }
 
   drawSelection() {
