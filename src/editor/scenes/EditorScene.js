@@ -14,6 +14,12 @@ const CORNERS = ['tl', 'tr', 'bl', 'br']
 // Matches a valid JS identifier — the generated code will use this name
 // directly as a property (this.<name>), so it must be a legal one.
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
+// How close (world pixels) a dragged edge/center needs to land next to
+// another element's own edge/center before it snaps to it — small enough
+// to stay out of the way at normal cursor precision, big enough to
+// actually catch an intended alignment.
+const SNAP_THRESHOLD = 6
+const SNAP_GUIDE_COLOR = 0xff2fd6
 // How many undo steps to keep — old enough entries just fall off rather
 // than growing the stack forever.
 const MAX_HISTORY = 100
@@ -81,6 +87,12 @@ export class EditorScene extends Phaser.Scene {
     this.marqueeGraphics = this.add.graphics()
     this.marqueeGraphics.setDepth(9999)
     this.marqueeStart = null
+
+    // Alignment guides while dragging a single element (see computeSnap/
+    // the 'drag' handler's single-element branch) — above the resize
+    // handles so a guide is never hidden behind one.
+    this.snapGuides = this.add.graphics()
+    this.snapGuides.setDepth(10002)
 
     this.resizeHandles = CORNERS.map((corner) => {
       const handle = this.add
@@ -212,6 +224,21 @@ export class EditorScene extends Phaser.Scene {
         // Top-level element (a plain element, or a group itself) — select
         // directly, and we're no longer "inside" any specific group.
         this.enteredGroupId = null
+
+        // Clicking an element that's already part of a multi-selection:
+        // defer collapsing down to just this one until we know whether a
+        // drag follows (see dragstart/gameobjectup below). Without this,
+        // 'selectElement' below would replace the whole multi-selection
+        // with this single element on mousedown, before 'drag' ever got a
+        // chance to move everyone together — silently making the 'drag'
+        // handler's own multi-selection branch unreachable from an
+        // ordinary click-and-drag gesture (confirmed by testing it).
+        if (!additive && this.selectedIds.size > 1 && this.selectedIds.has(elementId)) {
+          this.pendingSingleSelectId = elementId
+          if (isDoubleClick && element.type === 'text') this.startEditingText(elementId)
+          return
+        }
+
         this.selectElement(elementId, { additive })
         if (isDoubleClick && element.type === 'text') this.startEditingText(elementId)
         return
@@ -225,6 +252,19 @@ export class EditorScene extends Phaser.Scene {
         this.enteredGroupId = null
         this.selectElement(element.parentId, { additive })
       }
+    })
+
+    // Completes the deferred decision from gameobjectdown's top-level
+    // branch: if pendingSingleSelectId is still set by the time the
+    // pointer comes up, no drag ever started for it (dragstart already
+    // clears it otherwise) — a plain click on one member of a multi-
+    // selection, which should collapse to just that element, same as
+    // clicking any other single element does.
+    this.input.on('gameobjectup', () => {
+      if (!this.pendingSingleSelectId) return
+      const id = this.pendingSingleSelectId
+      this.pendingSingleSelectId = null
+      this.selectElement(id, { additive: false })
     })
 
     // A handle drag starts from the corner opposite the one grabbed, so that
@@ -315,6 +355,22 @@ export class EditorScene extends Phaser.Scene {
     })
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+      // Cleared unconditionally up front and only ever redrawn by the
+      // single-element move branch below — every other branch just
+      // leaves it cleared, so switching to a different kind of drag (or
+      // ending one) never leaves a stale guide on screen.
+      this.snapGuides.clear()
+
+      // A real drag is now underway (this event doesn't fire otherwise) —
+      // the deferred single-select decision from gameobjectdown is moot:
+      // a click that turns into a drag should never collapse the multi-
+      // selection (see gameobjectup for the "no drag happened" case).
+      // Cleared here rather than in dragstart because dragstart actually
+      // fires *before* gameobjectdown for the same gesture (confirmed by
+      // tracing the real event order, not assumed) — clearing it there
+      // would run too early to undo what gameobjectdown was about to set.
+      this.pendingSingleSelectId = null
+
       if (gameObject === this.background) {
         this.updateMarqueeSelection(pointer.x, pointer.y)
         return
@@ -331,7 +387,7 @@ export class EditorScene extends Phaser.Scene {
       }
 
       if (gameObject.getData('isHandle')) {
-        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey)
+        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey, !!pointer.event?.altKey)
         return
       }
 
@@ -340,10 +396,20 @@ export class EditorScene extends Phaser.Scene {
       if (this.groupDragRedirect?.childId === elementId) {
         const { groupElement, pointerStartX, pointerStartY, groupStartX, groupStartY } =
           this.groupDragRedirect
-        groupElement.gameObject.x = groupStartX + (pointer.x - pointerStartX)
-        groupElement.gameObject.y = groupStartY + (pointer.y - pointerStartY)
-        groupElement.props.x = groupElement.gameObject.x
-        groupElement.props.y = groupElement.gameObject.y
+        const bounds = groupElement.gameObject.getBounds()
+        const snapped = this.computeSnap(
+          new Set([groupElement.id]),
+          bounds.width,
+          bounds.height,
+          groupStartX + (pointer.x - pointerStartX),
+          groupStartY + (pointer.y - pointerStartY),
+          !!pointer.event?.altKey,
+        )
+        groupElement.gameObject.x = snapped.x
+        groupElement.gameObject.y = snapped.y
+        groupElement.props.x = snapped.x
+        groupElement.props.y = snapped.y
+        this.drawSnapGuides(snapped.guides)
         this.drawSelection()
         this.events.emit('elementchange', this.getElementSnapshot(groupElement.id))
         return
@@ -356,23 +422,50 @@ export class EditorScene extends Phaser.Scene {
       const deltaY = dragY - gameObject.y
 
       if (this.selectedIds.size > 1 && this.selectedIds.has(elementId)) {
-        // Part of a multi-selection: move every selected element by the same
-        // delta, so the whole group is dragged together.
-        for (const id of this.selectedIds) {
-          const el = this.elements.find((e) => e.id === id)
-          if (!el) continue
-          el.gameObject.x += deltaX
-          el.gameObject.y += deltaY
+        // Part of a multi-selection: move every selected element by the
+        // same delta, so the whole group is dragged together — snapped as
+        // one unit (the union of everyone moving) against elements
+        // outside the selection, rather than each member snapping on its
+        // own (which would fight the others for a single shared delta).
+        const selected = [...this.selectedIds]
+          .map((id) => this.elements.find((el) => el.id === id))
+          .filter(Boolean)
+        const currentBounds = this.getBoundsUnion(selected)
+        const snapped = this.computeSnap(
+          this.selectedIds,
+          currentBounds.width,
+          currentBounds.height,
+          currentBounds.left + deltaX,
+          currentBounds.top + deltaY,
+          !!pointer.event?.altKey,
+        )
+        const adjustedDeltaX = snapped.x - currentBounds.left
+        const adjustedDeltaY = snapped.y - currentBounds.top
+        for (const el of selected) {
+          el.gameObject.x += adjustedDeltaX
+          el.gameObject.y += adjustedDeltaY
           el.props.x = el.gameObject.x
           el.props.y = el.gameObject.y
         }
+        this.drawSnapGuides(snapped.guides)
       } else {
-        // Single element: keeps its stored props (and the properties panel,
-        // via 'elementchange') in sync with its actual position live.
-        gameObject.x = dragX
-        gameObject.y = dragY
-        element.props.x = dragX
-        element.props.y = dragY
+        // Single element: snap its candidate position against every other
+        // top-level element's own edges/center first (see computeSnap),
+        // then keep its stored props (and the properties panel, via
+        // 'elementchange') in sync with wherever it actually landed.
+        const snapped = this.computeSnap(
+          new Set([elementId]),
+          element.props.width,
+          element.props.height,
+          dragX,
+          dragY,
+          !!pointer.event?.altKey,
+        )
+        gameObject.x = snapped.x
+        gameObject.y = snapped.y
+        element.props.x = snapped.x
+        element.props.y = snapped.y
+        this.drawSnapGuides(snapped.guides)
         this.events.emit('elementchange', this.getElementSnapshot(elementId))
       }
 
@@ -381,6 +474,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.input.on('dragend', (pointer, gameObject) => {
       this.groupDragRedirect = null
+      this.snapGuides.clear()
       if (gameObject === this.background) {
         this.marqueeGraphics.clear()
         this.marqueeStart = null
@@ -1698,8 +1792,21 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('elementchange', this.getElementSnapshot(element.id))
   }
 
-  resizeSelected(handle, dragX, dragY, keepAspectRatio = false) {
+  resizeSelected(handle, dragX, dragY, keepAspectRatio = false, disableSnap = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
+
+    // Snaps the free corner itself (the one following the pointer) against
+    // every other top-level element's left/center/right and top/middle/
+    // bottom — reusing computeSnap with width/height 0 collapses its own
+    // three reference lines down to the corner's exact point, exactly what
+    // a corner has no "size" of its own to offer. The elements actually
+    // being resized are excluded so a selection never snaps to its own
+    // (about to change) edges.
+    const excludeIds = new Set(this.resizeSnapshot.map((entry) => entry.element.id))
+    const snappedCorner = this.computeSnap(excludeIds, 0, 0, dragX, dragY, disableSnap)
+    dragX = snappedCorner.x
+    dragY = snappedCorner.y
+    this.drawSnapGuides(snappedCorner.guides)
 
     const fixedX = handle.getData('fixedX')
     const fixedY = handle.getData('fixedY')
@@ -1831,6 +1938,93 @@ export class EditorScene extends Phaser.Scene {
     const top = Math.min(...boundsList.map((bounds) => bounds.top))
     const bottom = Math.max(...boundsList.map((bounds) => bounds.bottom))
     return { left, right, top, bottom, width: right - left, height: bottom - top }
+  }
+
+  // Alignment guides/snapping for a drag — a single element, a whole group
+  // (its own bounds), or a multi-selection (the union of everyone moving,
+  // see the 'drag' handler's three branches) against every *other*
+  // top-level element not part of the thing being moved. excludeIds is a
+  // Set so a multi-selection's own members never snap against each other.
+  // (candidateX, candidateY) is where the moving thing's top-left is
+  // *about* to move to, before it's actually applied — width/height come
+  // from its current (pre-move) bounds, since a plain move never changes
+  // them. Checks its left/center/right (and top/middle/bottom) against
+  // every other element's own three lines per axis, independently for X
+  // and Y, snapping to the closest match within SNAP_THRESHOLD on each —
+  // so a drag can snap horizontally to one element and vertically to a
+  // completely different one at the same time, same as Figma. Returns the
+  // possibly-adjusted position plus the guide lines to draw for whatever
+  // actually matched. `disabled` is the Alt-key override (see every call
+  // site's own `!!pointer.event?.altKey`) — a créa holding it wants exact,
+  // unassisted placement for this one drag, so this just hands the
+  // candidate position straight back with no guides rather than skipping
+  // the call entirely at each site.
+  computeSnap(excludeIds, width, height, candidateX, candidateY, disabled = false) {
+    if (disabled) return { x: candidateX, y: candidateY, guides: [] }
+    const others = this.elements.filter((element) => !element.parentId && !excludeIds.has(element.id))
+    if (others.length === 0) return { x: candidateX, y: candidateY, guides: [] }
+
+    const xLines = [candidateX, candidateX + width / 2, candidateX + width]
+    const yLines = [candidateY, candidateY + height / 2, candidateY + height]
+
+    let bestXDelta = null
+    let bestXGuide = null
+    let bestYDelta = null
+    let bestYGuide = null
+
+    for (const other of others) {
+      const bounds = other.gameObject.getBounds()
+      const otherXLines = [bounds.left, bounds.centerX, bounds.right]
+      const otherYLines = [bounds.top, bounds.centerY, bounds.bottom]
+
+      for (const line of xLines) {
+        for (const otherLine of otherXLines) {
+          const delta = otherLine - line
+          if (Math.abs(delta) < SNAP_THRESHOLD && (bestXDelta === null || Math.abs(delta) < Math.abs(bestXDelta))) {
+            bestXDelta = delta
+            bestXGuide = otherLine
+          }
+        }
+      }
+      for (const line of yLines) {
+        for (const otherLine of otherYLines) {
+          const delta = otherLine - line
+          if (Math.abs(delta) < SNAP_THRESHOLD && (bestYDelta === null || Math.abs(delta) < Math.abs(bestYDelta))) {
+            bestYDelta = delta
+            bestYGuide = otherLine
+          }
+        }
+      }
+    }
+
+    const guides = []
+    if (bestXGuide !== null) guides.push({ axis: 'x', value: bestXGuide })
+    if (bestYGuide !== null) guides.push({ axis: 'y', value: bestYGuide })
+
+    return {
+      x: candidateX + (bestXDelta ?? 0),
+      y: candidateY + (bestYDelta ?? 0),
+      guides,
+    }
+  }
+
+  // Draws whatever guide lines computeSnap found — a full-canvas line
+  // through the matched coordinate, same convention as Figma's own smart
+  // guides (simpler than trying to span exactly between the two shapes,
+  // and just as clear about *what* lined up).
+  drawSnapGuides(guides) {
+    this.snapGuides.clear()
+    if (guides.length === 0) return
+
+    const { width, height } = this.scale
+    this.snapGuides.lineStyle(1, SNAP_GUIDE_COLOR, 1)
+    for (const guide of guides) {
+      if (guide.axis === 'x') {
+        this.snapGuides.lineBetween(guide.value, 0, guide.value, height)
+      } else {
+        this.snapGuides.lineBetween(0, guide.value, width, guide.value)
+      }
+    }
   }
 
   drawSelection() {

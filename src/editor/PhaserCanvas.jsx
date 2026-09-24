@@ -58,12 +58,10 @@ export function PhaserCanvas({
       scene: [EditorScene],
     })
     gameRef.current = game
-    window.__debugGame = game
 
     game.events.once(Phaser.Core.Events.READY, () => {
       const scene = game.scene.getScene('EditorScene')
       sceneRef.current = scene
-      window.__debugScene = scene
       scene.events.on('selectionchange', (element) => onSelectionChange?.(element))
       scene.events.on('elementchange', (element) => onElementChange?.(element))
       scene.events.on('elementsChange', (elements) => onElementsChange?.(elements))
