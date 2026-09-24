@@ -520,11 +520,14 @@ export class EditorScene extends Phaser.Scene {
   // "Lier comme bouton" — turns 2 or 3 selected top-level elements/groups
   // into a Bouton composé, one per named state (Normal, then Survol, then
   // Appui, in selection order — reassignable afterwards, see the
-  // properties panel's role pickers). Reuses groupSelected's exact
-  // reparenting mechanics (world-to-local coordinate conversion before
-  // Container.add(), same caveat about it not doing that conversion
-  // itself) since adopting existing elements as children is identical
-  // either way — only the resulting element's type and props differ.
+  // properties panel's role pickers). Every state overlays the exact same
+  // spot — Normal's own position, wherever that happened to be drawn —
+  // rather than each keeping its original offset the way a plain group's
+  // reparenting does (see groupSelected): a créa sketches variants
+  // anywhere on the canvas (or already stacked), the same way a Figma
+  // component's variants don't have to sit where an instance of it ends
+  // up. The button's own hit area covers the *largest* linked element,
+  // not just Normal's, so a bigger Survol/Appui isn't visually clipped.
   // Capped at 3 since statebutton.js's syncVisual only knows about three
   // named slots; a 4th linked child would never be hidden by it and would
   // sit on top of whichever state is "showing".
@@ -534,10 +537,13 @@ export class EditorScene extends Phaser.Scene {
     )
     if (selected.length < 2 || selected.length > 3) return
 
-    const bounds = this.getBoundsUnion(selected)
+    const [normal, hover, pressed] = selected
+    const anchor = normal.gameObject.getBounds()
+    const width = Math.max(...selected.map((element) => element.gameObject.getBounds().width))
+    const height = Math.max(...selected.map((element) => element.gameObject.getBounds().height))
 
-    const container = this.add.container(bounds.left, bounds.top)
-    container.setSize(bounds.width, bounds.height)
+    const container = this.add.container(anchor.left, anchor.top)
+    container.setSize(width, height)
     this.makeInteractive(container)
     this.input.setDraggable(container)
 
@@ -547,15 +553,18 @@ export class EditorScene extends Phaser.Scene {
     container.setData('elementType', 'statebutton')
 
     for (const element of selected) {
-      element.gameObject.x -= bounds.left
-      element.gameObject.y -= bounds.top
+      // (0, 0) local, always — not offset by wherever it used to sit on
+      // the canvas (contrast groupSelected's world-to-local conversion),
+      // since every linked state is an interchangeable view of this one
+      // fixed spot, not a fixed layout position relative to its siblings.
+      element.gameObject.x = 0
+      element.gameObject.y = 0
       container.add(element.gameObject)
       element.parentId = id
-      element.props.x = element.gameObject.x
-      element.props.y = element.gameObject.y
+      element.props.x = 0
+      element.props.y = 0
     }
 
-    const [normal, hover, pressed] = selected
     const definition = componentLibrary.find((component) => component.type === 'statebutton')
     const stateButtonElement = {
       id,
@@ -564,10 +573,10 @@ export class EditorScene extends Phaser.Scene {
       props: {
         ...definition.defaultProps,
         name: `statebutton${this.typeCounters.statebutton}`,
-        x: bounds.left,
-        y: bounds.top,
-        width: bounds.width,
-        height: bounds.height,
+        x: anchor.left,
+        y: anchor.top,
+        width,
+        height,
         normalChildId: normal.id,
         hoverChildId: hover?.id ?? null,
         pressedChildId: pressed?.id ?? null,
@@ -613,8 +622,10 @@ export class EditorScene extends Phaser.Scene {
   // assignStateRole, same as linkAsStates' own guess). No-op once all
   // three slots are already taken: adding a 4th child with no role would
   // never be hidden by syncVisual, sitting on top of whichever state
-  // shows. Doesn't touch the container's own width/height — a créa can
-  // resize it by hand afterwards the same way as any other element.
+  // shows. Grows the container's hit area if this child is bigger than
+  // what it currently covers — same "largest wins" rule as linkAsStates —
+  // but never shrinks it back down, so a créa's own manual resize isn't
+  // silently undone by adding a smaller state afterwards.
   addChildToStateButton(id, childId) {
     const element = this.elements.find((el) => el.id === id)
     if (!element || element.type !== 'statebutton') return
@@ -625,16 +636,26 @@ export class EditorScene extends Phaser.Scene {
     const emptyKey = roleKeys.find((key) => !element.props[key])
     if (!emptyKey) return
 
-    // Same world-to-local conversion as linkAsStates/groupSelected — the
-    // container's own x/y IS its top-left (see its create()'s note), so
-    // this is a plain offset, no bounds recomputation needed.
-    child.gameObject.x -= element.gameObject.x
-    child.gameObject.y -= element.gameObject.y
+    // (0, 0) local, always — same reasoning as linkAsStates: every linked
+    // state overlays the button's one fixed spot, not wherever it used to
+    // sit on the canvas.
+    const childBounds = child.gameObject.getBounds()
+    child.gameObject.x = 0
+    child.gameObject.y = 0
     element.gameObject.add(child.gameObject)
     child.parentId = id
-    child.props.x = child.gameObject.x
-    child.props.y = child.gameObject.y
+    child.props.x = 0
+    child.props.y = 0
     element.props[emptyKey] = child.id
+
+    const width = Math.max(element.props.width, childBounds.width)
+    const height = Math.max(element.props.height, childBounds.height)
+    if (width !== element.props.width || height !== element.props.height) {
+      element.props.width = width
+      element.props.height = height
+      element.gameObject.setSize(width, height)
+      this.makeInteractive(element.gameObject)
+    }
 
     this.syncCompositeVisual(element)
     this.reindexDepths()
