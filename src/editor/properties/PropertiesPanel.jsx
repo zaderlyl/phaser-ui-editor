@@ -19,6 +19,7 @@ function hexToColorNumber(hex) {
 // elements yet.
 export function PropertiesPanel({
   elements,
+  allElements,
   onChange,
   onRename,
   onDelete,
@@ -26,6 +27,8 @@ export function PropertiesPanel({
   onAlign,
   onGroup,
   onUngroup,
+  onLinkAsStates,
+  onAssignStateRole,
   onReplaceImage,
   onSetProgressBarIcon,
   onSetImageButtonTexture,
@@ -94,6 +97,15 @@ export function PropertiesPanel({
         <button type="button" className="properties-panel__group-button" onClick={onGroup}>
           Grouper (⌘G)
         </button>
+
+        {/* Bouton composé needs exactly 2 or 3 children (one per named
+            state — see statebutton.js/linkAsStates), so this is hidden
+            past that rather than shown and silently doing nothing. */}
+        {elements.length <= 3 && (
+          <button type="button" className="properties-panel__group-button" onClick={onLinkAsStates}>
+            Lier comme bouton
+          </button>
+        )}
 
         <button type="button" className="properties-panel__delete" onClick={onDeleteSelected}>
           Supprimer ({elements.length})
@@ -261,12 +273,52 @@ export function PropertiesPanel({
         </div>
       )}
 
-      {('hoverColor' in props || 'hoverTextureKey' in props) && (
+      {/* Bouton composé only: linkAsStates guessed Normal/Survol/Appui
+          from selection order — this lets a créa see and correct that
+          per child, or unassign one ("Aucun") without unlinking it. */}
+      {'normalChildId' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">États liés</span>
+          {(allElements ?? [])
+            .filter((element) => element.parentId === id)
+            .map((child) => {
+              const currentRole =
+                props.normalChildId === child.id
+                  ? 'normal'
+                  : props.hoverChildId === child.id
+                    ? 'hover'
+                    : props.pressedChildId === child.id
+                      ? 'pressed'
+                      : 'none'
+              return (
+                <div key={child.id} className="properties-panel__row">
+                  <span>{child.props.name}</span>
+                  <select
+                    value={currentRole}
+                    onChange={(event) => onAssignStateRole(id, child.id, event.target.value)}
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="hover">Survol</option>
+                    <option value="pressed">Appui</option>
+                    <option value="none">Aucun</option>
+                  </select>
+                </div>
+              )
+            })}
+        </div>
+      )}
+
+      {('hoverColor' in props || 'hoverTextureKey' in props || 'normalChildId' in props) && (
         <div className="properties-panel__group">
           <button
             type="button"
             className="properties-panel__group-button"
-            onClick={() => onOpenStatePreview(single)}
+            onClick={() =>
+              onOpenStatePreview(
+                single,
+                (allElements ?? []).filter((element) => element.parentId === id),
+              )
+            }
           >
             Aperçu des états
           </button>

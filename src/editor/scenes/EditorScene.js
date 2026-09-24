@@ -356,6 +356,36 @@ export class EditorScene extends Phaser.Scene {
     })
   }
 
+  // setInteractive({ useHandCursor: true }) with no explicit hitArea makes
+  // Phaser compute one from the object's own width/height — which works
+  // fine for a Shape/Image/Text (origin 0 everywhere in this codebase, so
+  // its displayOrigin is (0,0) and the hit area lines up with the visual
+  // top-left-based bounds every other method here assumes). A Container's
+  // origin, though, is a fixed, non-configurable 0.5 regardless of
+  // setOrigin() (see groupSelected's note) — and Phaser's hit test always
+  // offsets the click point by +displayOriginX/Y before comparing it to
+  // the hitArea (Phaser.Input.InputManager.pointWithinHitArea). For a
+  // Container that silently shifts the *effective* clickable zone up-left
+  // by half its own size, so only its top-left quadrant is actually
+  // clickable — confirmed with a real repro: linking two differently-sized
+  // panels into a Bouton composé, a real click well inside the linked
+  // button's own bounds (bottom-right of it) fell through to the canvas
+  // background instead of selecting it. Passing an explicit hitArea offset
+  // by (width/2, height/2) cancels that shift back out, restoring the
+  // whole top-left-based area as clickable — verified against Phaser's own
+  // pointWithinHitArea/hitTest source, not just re-tested by guessing.
+  makeInteractive(gameObject) {
+    if (gameObject.type === 'Container') {
+      gameObject.setInteractive(
+        new Phaser.Geom.Rectangle(gameObject.width / 2, gameObject.height / 2, gameObject.width, gameObject.height),
+        Phaser.Geom.Rectangle.Contains,
+      )
+      gameObject.input.cursor = 'pointer'
+    } else {
+      gameObject.setInteractive({ useHandCursor: true })
+    }
+  }
+
   // Instantiates a real Phaser GameObject for the given library component type
   // and tracks it as an element of the current screen.
   addElement(type, props = {}) {
@@ -375,7 +405,7 @@ export class EditorScene extends Phaser.Scene {
     gameObject.setData('elementId', id)
     gameObject.setData('elementType', type)
     if (typeof gameObject.setInteractive === 'function') {
-      gameObject.setInteractive({ useHandCursor: true })
+      this.makeInteractive(gameObject)
       this.input.setDraggable(gameObject)
     }
 
@@ -449,7 +479,7 @@ export class EditorScene extends Phaser.Scene {
     // origin-based offset — verified empirically, since assuming otherwise
     // silently shifted every grouped child on first pass (see below).
     container.setSize(bounds.width, bounds.height)
-    container.setInteractive({ useHandCursor: true })
+    this.makeInteractive(container)
     this.input.setDraggable(container)
 
     this.typeCounters.group = (this.typeCounters.group ?? 0) + 1
@@ -485,6 +515,96 @@ export class EditorScene extends Phaser.Scene {
     this.drawSelection()
     this.events.emit('elementsChange', this.getElementsSnapshot())
     this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // "Lier comme bouton" — turns 2 or 3 selected top-level elements/groups
+  // into a Bouton composé, one per named state (Normal, then Survol, then
+  // Appui, in selection order — reassignable afterwards, see the
+  // properties panel's role pickers). Reuses groupSelected's exact
+  // reparenting mechanics (world-to-local coordinate conversion before
+  // Container.add(), same caveat about it not doing that conversion
+  // itself) since adopting existing elements as children is identical
+  // either way — only the resulting element's type and props differ.
+  // Capped at 3 since statebutton.js's syncVisual only knows about three
+  // named slots; a 4th linked child would never be hidden by it and would
+  // sit on top of whichever state is "showing".
+  linkAsStates() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length < 2 || selected.length > 3) return
+
+    const bounds = this.getBoundsUnion(selected)
+
+    const container = this.add.container(bounds.left, bounds.top)
+    container.setSize(bounds.width, bounds.height)
+    this.makeInteractive(container)
+    this.input.setDraggable(container)
+
+    this.typeCounters.statebutton = (this.typeCounters.statebutton ?? 0) + 1
+    const id = crypto.randomUUID()
+    container.setData('elementId', id)
+    container.setData('elementType', 'statebutton')
+
+    for (const element of selected) {
+      element.gameObject.x -= bounds.left
+      element.gameObject.y -= bounds.top
+      container.add(element.gameObject)
+      element.parentId = id
+      element.props.x = element.gameObject.x
+      element.props.y = element.gameObject.y
+    }
+
+    const [normal, hover, pressed] = selected
+    const definition = componentLibrary.find((component) => component.type === 'statebutton')
+    const stateButtonElement = {
+      id,
+      type: 'statebutton',
+      parentId: null,
+      props: {
+        ...definition.defaultProps,
+        name: `statebutton${this.typeCounters.statebutton}`,
+        x: bounds.left,
+        y: bounds.top,
+        width: bounds.width,
+        height: bounds.height,
+        normalChildId: normal.id,
+        hoverChildId: hover?.id ?? null,
+        pressedChildId: pressed?.id ?? null,
+      },
+      gameObject: container,
+    }
+    this.elements.push(stateButtonElement)
+    this.reindexDepths()
+    this.syncCompositeVisual(stateButtonElement)
+
+    this.selectedIds = new Set([id])
+    this.drawSelection()
+    this.events.emit('elementsChange', this.getElementsSnapshot())
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Reassigns which state a Bouton composé's child represents — the
+  // properties panel's per-child role picker, for correcting/changing the
+  // Normal/Survol/Appui order linkAsStates only guessed from selection
+  // order. A child can only ever hold one role at a time, so it's cleared
+  // from whichever slot it already occupied before (if any) the new one
+  // is applied — 'none' alone just does that clearing, unassigning it.
+  assignStateRole(id, childId, role) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'statebutton') return
+    if (!this.elements.some((el) => el.id === childId && el.parentId === id)) return
+
+    const roleKeys = { normal: 'normalChildId', hover: 'hoverChildId', pressed: 'pressedChildId' }
+    for (const key of Object.values(roleKeys)) {
+      if (element.props[key] === childId) element.props[key] = null
+    }
+    const key = roleKeys[role]
+    if (key) element.props[key] = childId
+
+    this.syncCompositeVisual(element)
+    this.events.emit('elementchange', this.getElementSnapshot(id))
+    this.events.emit('elementsChange', this.getElementsSnapshot())
   }
 
   // Pulls one child out of its group's Container and back onto the scene

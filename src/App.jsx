@@ -62,6 +62,14 @@ function App() {
     sceneRef.current?.ungroupSelected()
   }, [])
 
+  const handleLinkAsStates = useCallback(() => {
+    sceneRef.current?.linkAsStates()
+  }, [])
+
+  const handleAssignStateRole = useCallback((id, childId, role) => {
+    sceneRef.current?.assignStateRole(id, childId, role)
+  }, [])
+
   const handleReplaceImage = useCallback((id) => {
     sceneRef.current?.requestImageReplace(id)
   }, [])
@@ -74,8 +82,8 @@ function App() {
     sceneRef.current?.requestImageButtonTexture(id, slot)
   }, [])
 
-  const handleOpenStatePreview = useCallback((element) => {
-    setPreviewElement(element)
+  const handleOpenStatePreview = useCallback((element, children = []) => {
+    setPreviewElement({ ...element, children })
   }, [])
 
   // Live position/size/name updates from a single-element drag, resize or
@@ -114,6 +122,7 @@ function App() {
         </main>
         <PropertiesPanel
           elements={selectedElements}
+          allElements={elements}
           onChange={handlePropertyChange}
           onRename={handleRename}
           onDelete={handleDelete}
@@ -121,6 +130,8 @@ function App() {
           onAlign={handleAlign}
           onGroup={handleGroup}
           onUngroup={handleUngroup}
+          onLinkAsStates={handleLinkAsStates}
+          onAssignStateRole={handleAssignStateRole}
           onReplaceImage={handleReplaceImage}
           onSetProgressBarIcon={handleSetProgressBarIcon}
           onSetImageButtonTexture={handleSetImageButtonTexture}
