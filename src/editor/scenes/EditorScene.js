@@ -1036,10 +1036,11 @@ export class EditorScene extends Phaser.Scene {
     // so unlike resizeSelected there's no perf reason to skip this — and
     // without it the layers panel and code export kept reading whatever
     // this element's props were before the edit (see dragend's identical
-    // fix for the same staleness on drag/resize). Coalesced per element
+    // fix for the same staleness on drag/resize). Coalesced per property
     // (see commitHistory) so typing several characters into the same field
-    // is one undo step, not one per keystroke.
-    this.commitHistory(`props:${id}`)
+    // is one undo step, while switching fields starts a distinct step.
+    const propertyKey = Object.keys(patch).sort().join(',')
+    this.commitHistory(`props:${id}:${propertyKey}`)
   }
 
   // Renames an element after validating it as a JS identifier (it becomes
@@ -1064,9 +1065,9 @@ export class EditorScene extends Phaser.Scene {
 
     element.props.name = name
     this.events.emit('elementchange', this.getElementSnapshot(id))
-    // Coalesced per element, same reason as updateElementProps — renaming
-    // fires once per keystroke too.
-    this.commitHistory(`props:${id}`)
+    // Coalesced by the name property, same reason as updateElementProps —
+    // renaming fires once per keystroke too.
+    this.commitHistory(`props:${id}:name`)
     return { success: true }
   }
 

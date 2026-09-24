@@ -172,6 +172,24 @@ describe('EditorScene undo/redo', () => {
     expect(scene.elements[0].props.x).toBe(140)
   })
 
+  it('coalesces edits to one property but separates different properties', () => {
+    const element = addPanel(scene)
+
+    scene.updateElementProps(element.id, { x: 10 })
+    scene.updateElementProps(element.id, { x: 20 })
+    expect(scene.undoStack).toHaveLength(2)
+
+    scene.updateElementProps(element.id, { y: 30 })
+    expect(scene.undoStack).toHaveLength(3)
+
+    scene.undo()
+    expect(scene.elements[0].props.x).toBe(20)
+    expect(scene.elements[0].props.y).toBe(0)
+
+    scene.undo()
+    expect(scene.elements[0].props.x).toBe(0)
+  })
+
   it('undoes and redoes multiple deletion as one action', () => {
     const first = addPanel(scene)
     const second = addPanel(scene, 200)
