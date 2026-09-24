@@ -1,5 +1,6 @@
 import { panelComponent } from './components/panel'
 import { circleComponent } from './components/circle'
+import { lineComponent } from './components/line'
 import { textComponent } from './components/text'
 import { buttonComponent } from './components/button'
 import { imageComponent } from './components/image'
@@ -12,6 +13,7 @@ import { stateButtonComponent } from './components/statebutton'
 export const componentLibrary = [
   panelComponent,
   circleComponent,
+  lineComponent,
   textComponent,
   buttonComponent,
   imageComponent,
