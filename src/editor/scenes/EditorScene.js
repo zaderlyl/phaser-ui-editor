@@ -1529,15 +1529,15 @@ export class EditorScene extends Phaser.Scene {
     if ('padding' in patch || 'verticalAlign' in patch) {
       this.applyTextLayout(element)
     }
-    if (gameObject.type === 'Container') {
-      // A composite Container (Button, ProgressBar, ...) has no direct API
-      // for any of the per-property branches above (see the no-ops noted
-      // there) — resync all of its children from props instead, whatever
-      // changed. Unconditional rather than gated on a specific list of
-      // prop names, so a new composite's own props (e.g. ProgressBar's
-      // value) don't need this list updated too.
-      this.syncCompositeVisual(element)
-    }
+    // Called for every element, not just Container-based composites
+    // (Button, ProgressBar, ...) — a non-Container shape can declare its
+    // own syncVisual too, for a prop none of the per-property branches
+    // above know about (see Polygone's own sides/isStar/innerRadiusRatio,
+    // which don't map to any single Phaser setter the way color/stroke
+    // do). syncCompositeVisual itself already no-ops for any component
+    // that doesn't define syncVisual, so this is a safe no-op for every
+    // existing plain shape/text/image.
+    this.syncCompositeVisual(element)
 
     this.drawSelection()
     this.events.emit('elementchange', this.getElementSnapshot(id))
@@ -2019,6 +2019,12 @@ export class EditorScene extends Phaser.Scene {
         } else {
           gameObject.setSize(elWidth, elHeight)
         }
+        // A plain setSize() only updates size *metadata* for a shape whose
+        // rendering is actually driven by an explicit points array (see
+        // Polygone's own syncVisual) — harmless no-op for every other
+        // shape/text/image, same reasoning as updateElementProps' own
+        // now-unconditional call.
+        this.syncCompositeVisual(element)
       }
       gameObject.x = elLeft + gameObject.originX * elWidth
       gameObject.y = elTop + gameObject.originY * elHeight
