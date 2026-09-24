@@ -387,7 +387,7 @@ export class EditorScene extends Phaser.Scene {
       }
 
       if (gameObject.getData('isHandle')) {
-        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey)
+        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey, !!pointer.event?.altKey)
         return
       }
 
@@ -403,6 +403,7 @@ export class EditorScene extends Phaser.Scene {
           bounds.height,
           groupStartX + (pointer.x - pointerStartX),
           groupStartY + (pointer.y - pointerStartY),
+          !!pointer.event?.altKey,
         )
         groupElement.gameObject.x = snapped.x
         groupElement.gameObject.y = snapped.y
@@ -436,6 +437,7 @@ export class EditorScene extends Phaser.Scene {
           currentBounds.height,
           currentBounds.left + deltaX,
           currentBounds.top + deltaY,
+          !!pointer.event?.altKey,
         )
         const adjustedDeltaX = snapped.x - currentBounds.left
         const adjustedDeltaY = snapped.y - currentBounds.top
@@ -457,6 +459,7 @@ export class EditorScene extends Phaser.Scene {
           element.props.height,
           dragX,
           dragY,
+          !!pointer.event?.altKey,
         )
         gameObject.x = snapped.x
         gameObject.y = snapped.y
@@ -1789,7 +1792,7 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('elementchange', this.getElementSnapshot(element.id))
   }
 
-  resizeSelected(handle, dragX, dragY, keepAspectRatio = false) {
+  resizeSelected(handle, dragX, dragY, keepAspectRatio = false, disableSnap = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
     // Snaps the free corner itself (the one following the pointer) against
@@ -1800,7 +1803,7 @@ export class EditorScene extends Phaser.Scene {
     // being resized are excluded so a selection never snaps to its own
     // (about to change) edges.
     const excludeIds = new Set(this.resizeSnapshot.map((entry) => entry.element.id))
-    const snappedCorner = this.computeSnap(excludeIds, 0, 0, dragX, dragY)
+    const snappedCorner = this.computeSnap(excludeIds, 0, 0, dragX, dragY, disableSnap)
     dragX = snappedCorner.x
     dragY = snappedCorner.y
     this.drawSnapGuides(snappedCorner.guides)
@@ -1951,8 +1954,13 @@ export class EditorScene extends Phaser.Scene {
   // so a drag can snap horizontally to one element and vertically to a
   // completely different one at the same time, same as Figma. Returns the
   // possibly-adjusted position plus the guide lines to draw for whatever
-  // actually matched.
-  computeSnap(excludeIds, width, height, candidateX, candidateY) {
+  // actually matched. `disabled` is the Alt-key override (see every call
+  // site's own `!!pointer.event?.altKey`) — a créa holding it wants exact,
+  // unassisted placement for this one drag, so this just hands the
+  // candidate position straight back with no guides rather than skipping
+  // the call entirely at each site.
+  computeSnap(excludeIds, width, height, candidateX, candidateY, disabled = false) {
+    if (disabled) return { x: candidateX, y: candidateY, guides: [] }
     const others = this.elements.filter((element) => !element.parentId && !excludeIds.has(element.id))
     if (others.length === 0) return { x: candidateX, y: candidateY, guides: [] }
 
