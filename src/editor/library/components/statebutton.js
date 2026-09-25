@@ -23,10 +23,11 @@ const defaultProps = {
   pressedChildId: null,
   originX: 0,
   originY: 0,
+  rotation: 0,
 }
 
 function create(scene, props) {
-  const { x, y, width, height, originX, originY } = props
+  const { x, y, width, height, originX, originY, rotation } = props
   const left = x - originX * width
   const top = y - originY * height
   // Mirrors Bouton's own convention of rewriting props.x/y to the
@@ -37,6 +38,7 @@ function create(scene, props) {
   props.y = top
   const container = scene.add.container(left, top)
   container.setSize(width, height)
+  container.setAngle(rotation)
   return container
 }
 

@@ -27,6 +27,7 @@ const defaultProps = {
   strokeThickness: 0,
   originX: 0,
   originY: 0,
+  rotation: 0,
 }
 
 function buildPathPoints(props) {
@@ -35,11 +36,12 @@ function buildPathPoints(props) {
 }
 
 function create(scene, props) {
-  const { x, y, color, strokeColor, strokeThickness, originX, originY } = props
+  const { x, y, color, strokeColor, strokeThickness, originX, originY, rotation } = props
   return scene.add
     .polygon(x, y, buildPathPoints(props), color)
     .setStrokeStyle(strokeThickness, strokeColor)
     .setOrigin(originX, originY)
+    .setAngle(rotation)
 }
 
 // Rebuilds the path's own points from current props — same mechanism as
@@ -52,11 +54,11 @@ function syncVisual(gameObject, props) {
 // Mirrors create() exactly — the literal points array is baked in at
 // export time, same as Polygone's own generateCode.
 function generateCode({ props }) {
-  const { name, x, y, color, strokeColor, strokeThickness, originX, originY } = props
+  const { name, x, y, color, strokeColor, strokeThickness, originX, originY, rotation } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
   const pointsLiteral = JSON.stringify(buildPathPoints(props))
-  return `this.${name} = scene.add.polygon(${Math.round(x)}, ${Math.round(y)}, ${pointsLiteral}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY});`
+  return `this.${name} = scene.add.polygon(${Math.round(x)}, ${Math.round(y)}, ${pointsLiteral}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)});`
 }
 
 // Same technique as Polygone's own toPolygonPoints: reads the actual

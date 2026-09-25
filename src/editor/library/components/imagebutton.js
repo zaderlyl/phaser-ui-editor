@@ -42,11 +42,16 @@ const defaultProps = {
   hoverOutCallback: '',
   originX: 0,
   originY: 0,
+  rotation: 0,
 }
 
 function create(scene, props) {
-  const { x, y, width, height, textureKey, originX, originY } = props
-  return scene.add.image(x, y, textureKey).setDisplaySize(width, height).setOrigin(originX, originY)
+  const { x, y, width, height, textureKey, originX, originY, rotation } = props
+  return scene.add
+    .image(x, y, textureKey)
+    .setDisplaySize(width, height)
+    .setOrigin(originX, originY)
+    .setAngle(rotation)
 }
 
 // Escapes the data: URL for a single-quoted JS string literal. Base64 data
@@ -110,6 +115,7 @@ function generateCode(element, containerRef = 'this') {
     pressedImageData,
     originX,
     originY,
+    rotation,
     callback,
     hoverCallback,
     hoverOutCallback,
@@ -121,7 +127,7 @@ function generateCode(element, containerRef = 'this') {
   const lines = [
     `scene.textures.addBase64('${textureKey}', '${escapeForLiteral(imageData)}');`,
     `scene.textures.once('addtexture-${textureKey}', () => {`,
-    `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${w}, ${h}).setOrigin(${originX}, ${originY});`,
+    `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${w}, ${h}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)});`,
     `  this.${name}.setInteractive({ useHandCursor: true });`,
     `  this.${name}.on('pointerup', () => { this.${name}.setTexture('${restingTextureKey}').setDisplaySize(${w}, ${h}); this.${callback}(); });`,
   ]

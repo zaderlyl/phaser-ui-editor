@@ -819,6 +819,17 @@ export function PropertiesPanel({
         </div>
       )}
 
+      {'rotation' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Rotation</span>
+          <input
+            type="number"
+            value={Math.round(props.rotation)}
+            onChange={handleNumberChange('rotation')}
+          />
+        </div>
+      )}
+
       {'cornerRadius' in props && (
         <div className="properties-panel__group">
           <span className="properties-panel__group-label">Coins arrondis</span>

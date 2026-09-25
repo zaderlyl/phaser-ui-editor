@@ -1988,6 +1988,12 @@ export class EditorScene extends Phaser.Scene {
     if ('x' in patch || 'y' in patch) {
       gameObject.setPosition(element.props.x, element.props.y)
     }
+    if ('rotation' in patch) {
+      // Every gameObject type here (Shape, Polygon, Text, Container, Image)
+      // supports setAngle generically — no per-component branch needed, same
+      // as the position block just above.
+      gameObject.setAngle(element.props.rotation)
+    }
     if ('width' in patch || 'height' in patch) {
       // A Rectangle's setSize() IS its visual size, but Text has its own
       // fixed-size + word-wrap mechanism (see text.js) — setSize() on Text
