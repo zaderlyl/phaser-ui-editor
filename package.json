@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "phaser": "^4.2.1",
+    "polygon-clipping": "^0.15.7",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
