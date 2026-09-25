@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { componentLibrary } from '../library/registry'
+import { unionPolygons } from '../geometry/booleanOps'
 
 const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
@@ -857,6 +858,55 @@ export class EditorScene extends Phaser.Scene {
     this.drawSelection()
     this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Union (Pathfinder-style boolean op, see booleanOps.js) — merges
+  // exactly 2 selected top-level shapes into a single new Tracé replacing
+  // both. Only shapes that declare their own toPolygonPoints (Panel,
+  // Cercle, Ligne, Polygone, Tracé) are eligible — a Bouton, Image,
+  // Texte, Bouton composé, ... has no obvious "outline" to merge, same
+  // gate the properties panel's own button uses to stay hidden for those.
+  // A union can only ever produce one shape (any two 2D regions merged
+  // together are always one contiguous outline, even if they don't
+  // touch) — Soustraction/Intersection/Exclusion, added next, can each
+  // produce zero, one, or several, needing their own bookkeeping for that.
+  unionSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) => definitions[index].toPolygonPoints(element))
+    const [resultPoints] = unionPolygons(pointsA, pointsB)
+    if (!resultPoints) return
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same bounding-box + normalized-unit-box math finishDrawingPath uses
+    // to turn raw world points into path.js's own props shape.
+    const left = Math.min(...resultPoints.map((point) => point.x))
+    const right = Math.max(...resultPoints.map((point) => point.x))
+    const top = Math.min(...resultPoints.map((point) => point.y))
+    const bottom = Math.max(...resultPoints.map((point) => point.y))
+    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    const points = resultPoints.map((point) => ({
+      x: (point.x - left) / width,
+      y: (point.y - top) / height,
+    }))
+
+    // removeElementInternal doesn't commit on its own (see its own note),
+    // so addElement's own commit below is the one and only history step
+    // for the whole operation — undo restores both original shapes.
+    const element = this.addElement('path', { x: left, y: top, width, height, points })
+    this.selectElement(element.id)
   }
 
   // Pen tool, step 1 of 2 (finishing/cancelling a path comes later): enters

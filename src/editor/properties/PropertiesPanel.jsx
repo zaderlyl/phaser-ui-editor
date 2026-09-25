@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { componentLibrary } from '../library/registry'
 import './PropertiesPanel.css'
 
 function colorNumberToHex(value) {
@@ -38,6 +39,7 @@ export function PropertiesPanel({
   onSetImageButtonTexture,
   onOpenStatePreview,
   onEditPathPoints,
+  onUnion,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -138,6 +140,24 @@ export function PropertiesPanel({
             </button>
           )
         })()}
+
+        {/* Union (Pathfinder-style boolean op): exactly 2 top-level shapes
+            that both know how to describe their own outline as a polygon
+            (see each component's own toPolygonPoints) — a Bouton, Image,
+            Texte, Bouton composé, ... has no obvious "outline" to merge,
+            so isn't eligible and this stays hidden rather than shown and
+            silently failing. */}
+        {elements.length === 2 &&
+          elements.every(
+            (element) =>
+              !element.parentId &&
+              typeof componentLibrary.find((component) => component.type === element.type)
+                ?.toPolygonPoints === 'function',
+          ) && (
+            <button type="button" className="properties-panel__group-button" onClick={onUnion}>
+              Union
+            </button>
+          )}
 
         <button type="button" className="properties-panel__delete" onClick={onDeleteSelected}>
           Supprimer ({elements.length})

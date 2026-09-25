@@ -88,6 +88,10 @@ function App() {
     sceneRef.current?.linkAsStates()
   }, [])
 
+  const handleUnion = useCallback(() => {
+    sceneRef.current?.unionSelected()
+  }, [])
+
   const handleAssignStateRole = useCallback((id, childId, role) => {
     sceneRef.current?.assignStateRole(id, childId, role)
   }, [])
@@ -201,6 +205,7 @@ function App() {
           onGroup={handleGroup}
           onUngroup={handleUngroup}
           onLinkAsStates={handleLinkAsStates}
+          onUnion={handleUnion}
           onAssignStateRole={handleAssignStateRole}
           onAddChildToStateButton={handleAddChildToStateButton}
           onRemoveStateButtonChild={handleRemoveStateButtonChild}
