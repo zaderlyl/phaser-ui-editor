@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { componentLibrary } from '../library/registry'
+import { unionPolygons, subtractPolygons, intersectPolygons, excludePolygons } from '../geometry/booleanOps'
 
 const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
@@ -699,9 +700,11 @@ export class EditorScene extends Phaser.Scene {
     return `${type}${this.typeCounters[type]}`
   }
 
-  // Instantiates a real Phaser GameObject for the given library component
-  // type and tracks it as an element of the current screen.
-  addElement(type, props = {}) {
+  // Mechanics only, no reindex/history commit — shared by addElement below
+  // and createPathsFromResults, which needs to create several elements
+  // (a Soustraction/Intersection/Exclusion result can be 0, 1, or several
+  // pieces) as part of a single undo step rather than one per element.
+  createElementInternal(type, props = {}) {
     const definition = componentLibrary.find((component) => component.type === type)
     if (!definition) {
       throw new Error(`Unknown component type: "${type}"`)
@@ -726,6 +729,13 @@ export class EditorScene extends Phaser.Scene {
     const element = { id, type, props: resolvedProps, gameObject, parentId: null }
     // New elements go on top, matching most editors' default stacking.
     this.elements.push(element)
+    return element
+  }
+
+  // Instantiates a real Phaser GameObject for the given library component
+  // type and tracks it as an element of the current screen.
+  addElement(type, props = {}) {
+    const element = this.createElementInternal(type, props)
     this.reindexDepths()
     this.commitHistory()
     return element
@@ -854,6 +864,196 @@ export class EditorScene extends Phaser.Scene {
 
     this.reindexDepths()
     this.selectedIds = new Set(duplicates.map((element) => element.id))
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Union (Pathfinder-style boolean op, see booleanOps.js) — merges
+  // exactly 2 selected top-level shapes into a single new Tracé replacing
+  // both. Only shapes that declare their own toPolygonPoints (Panel,
+  // Cercle, Ligne, Polygone, Tracé) are eligible — a Bouton, Image,
+  // Texte, Bouton composé, ... has no obvious "outline" to merge, same
+  // gate the properties panel's own button uses to stay hidden for those.
+  // A union can only ever produce one shape (any two 2D regions merged
+  // together are always one contiguous outline, even if they don't
+  // touch) — Soustraction/Intersection/Exclusion, added next, can each
+  // produce zero, one, or several, needing their own bookkeeping for that.
+  unionSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) => definitions[index].toPolygonPoints(element))
+    const [resultPoints] = unionPolygons(pointsA, pointsB)
+    if (!resultPoints) return
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same bounding-box + normalized-unit-box math finishDrawingPath uses
+    // to turn raw world points into path.js's own props shape.
+    const left = Math.min(...resultPoints.map((point) => point.x))
+    const right = Math.max(...resultPoints.map((point) => point.x))
+    const top = Math.min(...resultPoints.map((point) => point.y))
+    const bottom = Math.max(...resultPoints.map((point) => point.y))
+    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    const points = resultPoints.map((point) => ({
+      x: (point.x - left) / width,
+      y: (point.y - top) / height,
+    }))
+
+    // removeElementInternal doesn't commit on its own (see its own note),
+    // so addElement's own commit below is the one and only history step
+    // for the whole operation — undo restores both original shapes.
+    const element = this.addElement('path', { x: left, y: top, width, height, points })
+    this.selectElement(element.id)
+  }
+
+  // Shared by Soustraction/Intersection/Exclusion — those can each produce
+  // zero, one, or several disjoint result shapes (unlike Union, which is
+  // always exactly one), so every result point list is turned into its own
+  // new Tracé the same way. Uses createElementInternal (no self-commit) so
+  // creating several pieces still only takes one history step overall —
+  // the caller reindexes depths and commits once after this returns.
+  // Returns the created elements (possibly empty).
+  createPathsFromResults(resultsPoints) {
+    const created = []
+    for (const resultPoints of resultsPoints) {
+      const left = Math.min(...resultPoints.map((point) => point.x))
+      const right = Math.max(...resultPoints.map((point) => point.x))
+      const top = Math.min(...resultPoints.map((point) => point.y))
+      const bottom = Math.max(...resultPoints.map((point) => point.y))
+      const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+      const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+      const points = resultPoints.map((point) => ({
+        x: (point.x - left) / width,
+        y: (point.y - top) / height,
+      }))
+      created.push(this.createElementInternal('path', { x: left, y: top, width, height, points }))
+    }
+    return created
+  }
+
+  // Soustraction (Pathfinder-style boolean op) — cuts the front shape out
+  // of the back one, same convention as Figma/Illustrator. `selected` here
+  // comes straight from filtering this.elements, which is already in
+  // back-to-front paint order (see reindexDepths), so selected[0] is the
+  // base and selected[1] is the cutter — no extra sorting needed. Unlike
+  // Union, subtracting can leave 0 pieces (the cutter fully covers the
+  // base), 1 (the common case), or more (the cutter splits the base in
+  // two) — createPathsFromResults handles all three uniformly.
+  subtractSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsBack, pointsFront] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = subtractPolygons(pointsBack, pointsFront)
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Neither removeElementInternal nor createPathsFromResults commits on
+    // its own, so reindexDepths + commitHistory here is the one and only
+    // history step for the whole operation, however many pieces result —
+    // undo restores both original shapes regardless of piece count.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    if (created.length > 0) {
+      this.selectedIds = new Set(created.map((element) => element.id))
+    } else {
+      this.selectedIds = new Set()
+    }
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Intersection (Pathfinder-style boolean op) — keeps only the overlapping
+  // area of the 2 selected shapes. Order doesn't matter (unlike
+  // Soustraction), but the result can still be 0 pieces (no overlap at
+  // all), 1 (the common case), or more (two shapes overlapping in more
+  // than one disjoint region) — createPathsFromResults handles all three
+  // the same way subtractSelected does.
+  intersectSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = intersectPolygons(pointsA, pointsB)
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same single-history-step bookkeeping as subtractSelected — see its
+    // own note just above.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    this.selectedIds = new Set(created.map((element) => element.id))
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Exclusion (Pathfinder-style boolean op, XOR) — keeps everything except
+  // the overlapping area: the two shapes minus their shared region. Order-
+  // independent like Intersection. Two overlapping shapes always produce
+  // exactly 2 disjoint pieces (each shape's own non-overlapping remainder);
+  // two non-overlapping shapes produce 2 pieces that are just the
+  // originals back — createPathsFromResults handles either uniformly.
+  excludeSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = excludePolygons(pointsA, pointsB)
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same single-history-step bookkeeping as subtractSelected/
+    // intersectSelected — see subtractSelected's own note.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    this.selectedIds = new Set(created.map((element) => element.id))
     this.drawSelection()
     this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())

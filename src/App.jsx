@@ -88,6 +88,22 @@ function App() {
     sceneRef.current?.linkAsStates()
   }, [])
 
+  const handleUnion = useCallback(() => {
+    sceneRef.current?.unionSelected()
+  }, [])
+
+  const handleSubtract = useCallback(() => {
+    sceneRef.current?.subtractSelected()
+  }, [])
+
+  const handleIntersect = useCallback(() => {
+    sceneRef.current?.intersectSelected()
+  }, [])
+
+  const handleExclude = useCallback(() => {
+    sceneRef.current?.excludeSelected()
+  }, [])
+
   const handleAssignStateRole = useCallback((id, childId, role) => {
     sceneRef.current?.assignStateRole(id, childId, role)
   }, [])
@@ -201,6 +217,10 @@ function App() {
           onGroup={handleGroup}
           onUngroup={handleUngroup}
           onLinkAsStates={handleLinkAsStates}
+          onUnion={handleUnion}
+          onSubtract={handleSubtract}
+          onIntersect={handleIntersect}
+          onExclude={handleExclude}
           onAssignStateRole={handleAssignStateRole}
           onAddChildToStateButton={handleAddChildToStateButton}
           onRemoveStateButtonChild={handleRemoveStateButtonChild}
