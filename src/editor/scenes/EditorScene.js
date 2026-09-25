@@ -20,6 +20,14 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 // actually catch an intended alignment.
 const SNAP_THRESHOLD = 6
 const SNAP_GUIDE_COLOR = 0xff2fd6
+// How close (world pixels) a pen-tool click needs to land next to the
+// path's own first point before it counts as "close the path" instead of
+// placing another point — bigger than SNAP_THRESHOLD since a placed point
+// is small and precisely re-clicking it is harder than aligning an edge.
+const CLOSE_PATH_THRESHOLD = 12
+// Fewest points a pen-tool path needs before it's a real shape — closing
+// (or finishing) with fewer than this just cancels instead.
+const MIN_PATH_POINTS = 3
 // How many undo steps to keep — old enough entries just fall off rather
 // than growing the stack forever.
 const MAX_HISTORY = 100
@@ -62,6 +70,22 @@ export class EditorScene extends Phaser.Scene {
     this.lastSnapshot = { elements: [], selectedIds: [], enteredGroupId: null, typeCounters: {} }
     this.lastHistoryKey = null
     this.lastHistoryTime = 0
+    // Pen tool (see startDrawingPath/addPathPoint): true while placing a
+    // Tracé's points one click at a time, false the rest of the time —
+    // gameobjectdown's normal select/drag/marquee logic is suppressed
+    // entirely while this is on, since a click during drawing always means
+    // "place a point here", never "select whatever's under the cursor".
+    this.isDrawingPath = false
+    this.pathPoints = []
+    this.lastPathClickTime = 0
+    // Node-edit mode (see startEditingPathPoints): the Tracé element
+    // currently being edited, its points as live absolute world
+    // coordinates while dragging, a snapshot of those same points for
+    // Escape to revert to, and the one draggable handle per point.
+    this.editingPathId = null
+    this.editingPathPoints = []
+    this.editingPathOriginalPoints = []
+    this.pathPointHandles = []
   }
 
   create() {
@@ -93,6 +117,14 @@ export class EditorScene extends Phaser.Scene {
     // handles so a guide is never hidden behind one.
     this.snapGuides = this.add.graphics()
     this.snapGuides.setDepth(10002)
+
+    // Pen tool's own live preview — placed points connected by solid
+    // lines, a lighter line from the last point to the current cursor
+    // position, and a small dot marking each placed point (see
+    // redrawPathPreview) — above everything else so it's never obscured
+    // by whatever's already on the canvas.
+    this.pathDrawGraphics = this.add.graphics()
+    this.pathDrawGraphics.setDepth(10003)
 
     this.resizeHandles = CORNERS.map((corner) => {
       const handle = this.add
@@ -189,10 +221,19 @@ export class EditorScene extends Phaser.Scene {
     // opens it for inline editing instead — same 300ms/same-id detection,
     // shared across every branch below rather than only the group-child one.
     this.input.on('gameobjectdown', (pointer, gameObject) => {
+      // Pen tool active: a click anywhere (even on top of an existing
+      // element) always means "place a point here", never select/drag —
+      // handled entirely separately from the rest of this listener.
+      if (this.isDrawingPath) {
+        this.addPathPoint(pointer)
+        return
+      }
+
       if (
         gameObject.getData('isHandle') ||
         gameObject.getData('isRadiusHandle') ||
-        gameObject.getData('isLinkHandle')
+        gameObject.getData('isLinkHandle') ||
+        gameObject.getData('isPathPointHandle')
       )
         return
 
@@ -267,6 +308,14 @@ export class EditorScene extends Phaser.Scene {
       this.selectElement(id, { additive: false })
     })
 
+    // Pen tool's live "rubber band" segment from the last placed point to
+    // wherever the cursor currently is — 'pointermove' rather than 'drag'
+    // since there's no mouse button held down between clicks.
+    this.input.on('pointermove', (pointer) => {
+      if (!this.isDrawingPath) return
+      this.redrawPathPreview(pointer.worldX, pointer.worldY)
+    })
+
     // A handle drag starts from the corner opposite the one grabbed, so that
     // corner stays fixed in place while the grabbed one follows the pointer.
     this.input.on('dragstart', (pointer, gameObject) => {
@@ -296,6 +345,12 @@ export class EditorScene extends Phaser.Scene {
         this.linkDragSourceId = elements[0].id
         return
       }
+
+      // A path-point handle needs no snapshot at drag start — each point
+      // moves entirely independently, no anchor/fixed-corner concept the
+      // way a resize handle has (see 'drag's own branch for the actual
+      // per-point update).
+      if (gameObject.getData('isPathPointHandle')) return
 
       if (gameObject.getData('isHandle')) {
         const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
@@ -383,6 +438,15 @@ export class EditorScene extends Phaser.Scene {
 
       if (gameObject.getData('isLinkHandle')) {
         this.updateLinkDrag(pointer)
+        return
+      }
+
+      if (gameObject.getData('isPathPointHandle')) {
+        const index = gameObject.getData('pointIndex')
+        this.editingPathPoints[index] = { x: dragX, y: dragY }
+        gameObject.x = dragX
+        gameObject.y = dragY
+        this.updateEditingPathVisual()
         return
       }
 
@@ -485,6 +549,15 @@ export class EditorScene extends Phaser.Scene {
         this.finishLinkDrag(pointer)
         return
       }
+
+      // A path-point drag is a live in-progress edit, not a finished one —
+      // committing here (the generic fallthrough below) would push a
+      // no-op history entry every time a point is merely dropped, well
+      // before the edit is actually done (see finishEditingPathPoints,
+      // the real commit point once Enter/the button/clicking away ends
+      // the whole edit session).
+      if (gameObject.getData('isPathPointHandle')) return
+
       // Every other drag (element move, group move, resize) touched
       // position and/or size, but the live 'elementchange'/'elementsChange'
       // emitted mid-drag (see 'drag' above and resizeSelected) only cover
@@ -565,6 +638,26 @@ export class EditorScene extends Phaser.Scene {
 
       event.preventDefault()
       this.duplicateSelected()
+    })
+
+    // Pen tool: Enter finishes the path where it stands, Escape discards
+    // it. Node-edit mode (see startEditingPathPoints) reuses the same two
+    // keys for its own finish/revert — the two modes are never active at
+    // once, so no separate guard is needed to tell them apart, only which
+    // one (if either) is currently on.
+    this.input.keyboard.on('keydown-ENTER', (event) => {
+      if (!this.isDrawingPath && !this.editingPathId) return
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      event.preventDefault()
+      if (this.isDrawingPath) this.finishDrawingPath()
+      else this.finishEditingPathPoints()
+    })
+    this.input.keyboard.on('keydown-ESC', (event) => {
+      if (!this.isDrawingPath && !this.editingPathId) return
+      event.preventDefault()
+      if (this.isDrawingPath) this.cancelDrawingPath()
+      else this.cancelEditingPathPoints()
     })
   }
 
@@ -764,6 +857,247 @@ export class EditorScene extends Phaser.Scene {
     this.drawSelection()
     this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Pen tool, step 1 of 2 (finishing/cancelling a path comes later): enters
+  // point-placement mode. The current selection is cleared first since a
+  // click while drawing means "place a point", not "select this instead".
+  startDrawingPath() {
+    this.isDrawingPath = true
+    this.pathPoints = []
+    this.deselectAll()
+    this.pathDrawGraphics.clear()
+  }
+
+  // One click = one anchor point, in world coordinates — converted to the
+  // normalized unit-box representation path.js's own props expect only
+  // once the path is finished (its bounding box isn't known until every
+  // point has been placed), so raw world coordinates are kept here in the
+  // meantime.
+  // Two ways a click finishes the path instead of just extending it —
+  // both only once there are enough points for the result to be a real
+  // shape (see MIN_PATH_POINTS):
+  //  - clicking within CLOSE_PATH_THRESHOLD of the very first point
+  //    (the classic "click back on your starting point" pen-tool gesture)
+  //  - a double-click anywhere: its first click already lands as an
+  //    ordinary point (below) as it happens, then this same handler sees
+  //    the second click arrive within 300ms and finishes right there
+  //    instead of adding yet another point for it.
+  addPathPoint(pointer) {
+    const now = performance.now()
+    const isDoubleClick = now - this.lastPathClickTime < 300
+    this.lastPathClickTime = now
+
+    if (isDoubleClick && this.pathPoints.length >= MIN_PATH_POINTS) {
+      this.finishDrawingPath()
+      return
+    }
+
+    const point = { x: pointer.worldX, y: pointer.worldY }
+    if (this.pathPoints.length >= MIN_PATH_POINTS) {
+      const first = this.pathPoints[0]
+      const distance = Phaser.Math.Distance.Between(point.x, point.y, first.x, first.y)
+      if (distance < CLOSE_PATH_THRESHOLD) {
+        this.finishDrawingPath()
+        return
+      }
+    }
+
+    this.pathPoints.push(point)
+    this.redrawPathPreview(point.x, point.y)
+  }
+
+  // Enter, closing near the start point, and a double-click (see
+  // addPathPoint) all end up here — every ending this step supports
+  // produces a *closed* shape; a genuinely open, unfilled stroke would
+  // need Phaser.GameObjects.Graphics instead of the Polygon path.js
+  // builds on, deliberately deferred rather than taken on inside this
+  // same step (see path.js's own note on why only closed paths exist
+  // right now). Too few points to be a real shape just cancels instead —
+  // same as pressing Escape.
+  finishDrawingPath() {
+    if (this.pathPoints.length < MIN_PATH_POINTS) {
+      this.cancelDrawingPath()
+      return
+    }
+
+    const left = Math.min(...this.pathPoints.map((point) => point.x))
+    const right = Math.max(...this.pathPoints.map((point) => point.x))
+    const top = Math.min(...this.pathPoints.map((point) => point.y))
+    const bottom = Math.max(...this.pathPoints.map((point) => point.y))
+    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    // Normalized to the 0..1 unit box path.js's own props expect (see its
+    // buildPathPoints) — the bounding box isn't known until every point
+    // has been placed, so raw world coordinates were kept until now.
+    const points = this.pathPoints.map((point) => ({
+      x: (point.x - left) / width,
+      y: (point.y - top) / height,
+    }))
+
+    this.isDrawingPath = false
+    this.pathPoints = []
+    this.pathDrawGraphics.clear()
+
+    const element = this.addElement('path', { x: left, y: top, width, height, points })
+    this.selectElement(element.id)
+  }
+
+  // Escape, or finishing with too few points — discards whatever was
+  // placed so far without creating anything.
+  cancelDrawingPath() {
+    this.isDrawingPath = false
+    this.pathPoints = []
+    this.pathDrawGraphics.clear()
+  }
+
+  // Solid lines between every placed point, a lighter "rubber band"
+  // segment from the last one to the cursor, and a small dot marking each
+  // placed point — purely visual, redrawn from scratch on every call
+  // (there are at most a handful of points, so no perf concern in
+  // re-issuing these draw calls on every pointermove).
+  redrawPathPreview(cursorX, cursorY) {
+    this.pathDrawGraphics.clear()
+    if (this.pathPoints.length === 0) return
+
+    this.pathDrawGraphics.lineStyle(2, SNAP_GUIDE_COLOR, 1)
+    this.pathDrawGraphics.beginPath()
+    this.pathDrawGraphics.moveTo(this.pathPoints[0].x, this.pathPoints[0].y)
+    for (const point of this.pathPoints.slice(1)) {
+      this.pathDrawGraphics.lineTo(point.x, point.y)
+    }
+    this.pathDrawGraphics.strokePath()
+
+    const last = this.pathPoints[this.pathPoints.length - 1]
+    this.pathDrawGraphics.lineStyle(1, SNAP_GUIDE_COLOR, 0.6)
+    this.pathDrawGraphics.lineBetween(last.x, last.y, cursorX, cursorY)
+
+    this.pathDrawGraphics.fillStyle(0xffffff, 1)
+    for (const point of this.pathPoints) {
+      this.pathDrawGraphics.fillCircle(point.x, point.y, 3)
+    }
+  }
+
+  // Node-edit mode: one draggable handle per point on an existing Tracé,
+  // for reshaping it after the fact instead of only at creation time.
+  // Points are tracked here as live absolute world coordinates rather
+  // than through path.js's own normalized unit-box props while editing —
+  // recomputing that box on every drag tick (the way every other update
+  // does) would rescale *every* point whenever just one moves outside the
+  // current box, making one point's drag visibly drag all the others too.
+  // The box is only recomputed once, when the edit is actually committed
+  // (see finishEditingPathPoints).
+  startEditingPathPoints(id) {
+    const element = this.elements.find((el) => el.id === id)
+    if (!element || element.type !== 'path') return
+
+    this.editingPathId = id
+    this.editingPathPoints = element.props.points.map((point) => ({
+      x: element.props.x + point.x * element.props.width,
+      y: element.props.y + point.y * element.props.height,
+    }))
+    this.editingPathOriginalPoints = this.editingPathPoints.map((point) => ({ ...point }))
+
+    this.selectionGraphics.clear()
+    this.setHandlesVisible(false)
+    this.radiusHandle.setVisible(false)
+    this.radiusHandle.input.enabled = false
+    this.linkHandle.setVisible(false)
+    this.linkHandle.input.enabled = false
+    this.buildPathPointHandles()
+  }
+
+  buildPathPointHandles() {
+    this.destroyPathPointHandles()
+    this.pathPointHandles = this.editingPathPoints.map((point, index) => {
+      const handle = this.add
+        .circle(point.x, point.y, HANDLE_SIZE / 2, 0xffffff)
+        .setStrokeStyle(1, SELECTION_COLOR)
+        .setDepth(10001)
+      handle.setData('isPathPointHandle', true)
+      handle.setData('pointIndex', index)
+      const hitSize = HANDLE_SIZE + HANDLE_HIT_PADDING * 2
+      handle.setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(-hitSize / 2, -hitSize / 2, hitSize, hitSize),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        useHandCursor: true,
+      })
+      this.input.setDraggable(handle)
+      return handle
+    })
+  }
+
+  destroyPathPointHandles() {
+    for (const handle of this.pathPointHandles) handle.destroy()
+    this.pathPointHandles = []
+  }
+
+  // Redraws the live shape straight from the handles' current absolute
+  // positions (converted to local coordinates relative to the element's
+  // existing, not-yet-recomputed top-left) — see startEditingPathPoints'
+  // own note on why this doesn't go through the normalized-unit-box math
+  // every other update uses.
+  updateEditingPathVisual() {
+    const element = this.elements.find((el) => el.id === this.editingPathId)
+    if (!element) return
+    const { x, y } = element.props
+    const localPoints = this.editingPathPoints.map((point) => ({ x: point.x - x, y: point.y - y }))
+    element.gameObject.setTo(localPoints)
+  }
+
+  // Commits the edit: only *now* is the bounding box recomputed from
+  // wherever the points actually ended up (same math as
+  // finishDrawingPath), so the element's x/y/width/height stay a tight
+  // fit around its content instead of the stale pre-edit box.
+  finishEditingPathPoints() {
+    const element = this.elements.find((el) => el.id === this.editingPathId)
+    if (element) {
+      const left = Math.min(...this.editingPathPoints.map((point) => point.x))
+      const right = Math.max(...this.editingPathPoints.map((point) => point.x))
+      const top = Math.min(...this.editingPathPoints.map((point) => point.y))
+      const bottom = Math.max(...this.editingPathPoints.map((point) => point.y))
+      const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+      const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+      const points = this.editingPathPoints.map((point) => ({
+        x: (point.x - left) / width,
+        y: (point.y - top) / height,
+      }))
+
+      element.props.x = left
+      element.props.y = top
+      element.props.width = width
+      element.props.height = height
+      element.props.points = points
+      element.gameObject.setPosition(left, top)
+      this.syncCompositeVisual(element)
+      this.commitHistory()
+    }
+
+    this.stopEditingPathPoints()
+  }
+
+  // Escape: reverts to how the shape looked before this edit session
+  // started, discarding every point move — no history entry, since as far
+  // as undo/redo is concerned nothing actually changed.
+  cancelEditingPathPoints() {
+    if (this.editingPathId) {
+      this.editingPathPoints = this.editingPathOriginalPoints
+      this.updateEditingPathVisual()
+    }
+    this.stopEditingPathPoints()
+  }
+
+  stopEditingPathPoints() {
+    const id = this.editingPathId
+    this.editingPathId = null
+    this.editingPathPoints = []
+    this.editingPathOriginalPoints = []
+    this.destroyPathPointHandles()
+    if (id) {
+      this.selectElement(id)
+    } else {
+      this.drawSelection()
+    }
   }
 
   // Bundles the currently selected top-level elements into a real Phaser

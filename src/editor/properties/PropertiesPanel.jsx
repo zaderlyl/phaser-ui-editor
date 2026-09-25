@@ -37,6 +37,7 @@ export function PropertiesPanel({
   onSetProgressBarIcon,
   onSetImageButtonTexture,
   onOpenStatePreview,
+  onEditPathPoints,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -961,6 +962,16 @@ export function PropertiesPanel({
             </label>
           </div>
         </div>
+      )}
+
+      {'points' in props && (
+        <button
+          type="button"
+          className="properties-panel__group-button"
+          onClick={() => onEditPathPoints(id)}
+        >
+          Modifier les points
+        </button>
       )}
 
       {!single.parentId && (

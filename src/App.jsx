@@ -72,8 +72,16 @@ function App() {
     sceneRef.current?.duplicateSelected()
   }, [])
 
+  const handleActivatePathTool = useCallback(() => {
+    sceneRef.current?.startDrawingPath()
+  }, [])
+
   const handleUngroup = useCallback(() => {
     sceneRef.current?.ungroupSelected()
+  }, [])
+
+  const handleEditPathPoints = useCallback((id) => {
+    sceneRef.current?.startEditingPathPoints(id)
   }, [])
 
   const handleLinkAsStates = useCallback(() => {
@@ -163,7 +171,7 @@ function App() {
       </header>
       <div className="app-body">
         <div className="left-sidebar">
-          <LibraryPanel />
+          <LibraryPanel onActivatePathTool={handleActivatePathTool} />
           <LayersPanel
             elements={elements}
             selectedIds={selectedElements.map((element) => element.id)}
@@ -201,6 +209,7 @@ function App() {
           onSetProgressBarIcon={handleSetProgressBarIcon}
           onSetImageButtonTexture={handleSetImageButtonTexture}
           onOpenStatePreview={handleOpenStatePreview}
+          onEditPathPoints={handleEditPathPoints}
         />
       </div>
 
