@@ -24,6 +24,9 @@ const defaultProps = {
   strokeThickness: 0,
   originX: 0,
   originY: 0,
+  rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 // props.color is stored as a 0xRRGGBB number, same as every other
@@ -87,6 +90,9 @@ function create(scene, props) {
     strokeThickness,
     originX,
     originY,
+    rotation,
+    flipX,
+    flipY,
   } = props
   const textObject = scene.add
     .text(x, y, text, {
@@ -99,6 +105,8 @@ function create(scene, props) {
       wordWrap: { width, useAdvancedWrap: true },
     })
     .setOrigin(originX, originY)
+    .setAngle(rotation)
+    .setFlip(flipX, flipY)
   textObject.setFixedSize(width, height)
   applyTextLayout(textObject, props)
   return textObject
@@ -129,10 +137,13 @@ function generateCode({ props }) {
     strokeThickness,
     originX,
     originY,
+    rotation,
+    flipX,
+    flipY,
   } = props
   const fontStyle = toFontStyle(bold, italic)
   const wrapWidth = Math.max(0, Math.round(width) - padding * 2)
-  const base = `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}', stroke: '${toCssColor(strokeColor)}', strokeThickness: ${strokeThickness}, wordWrap: { width: ${wrapWidth}, useAdvancedWrap: true } }).setOrigin(${originX}, ${originY}).setFixedSize(${Math.round(width)}, ${Math.round(height)});`
+  const base = `this.${name} = scene.add.text(${Math.round(x)}, ${Math.round(y)}, '${escapeText(text)}', { fontSize: '${fontSize}px', color: '${toCssColor(color)}', fontStyle: '${fontStyle}', align: '${align}', stroke: '${toCssColor(strokeColor)}', strokeThickness: ${strokeThickness}, wordWrap: { width: ${wrapWidth}, useAdvancedWrap: true } }).setOrigin(${originX}, ${originY}).setFixedSize(${Math.round(width)}, ${Math.round(height)}).setAngle(${Math.round(rotation)}).setFlip(${flipX}, ${flipY});`
 
   if (padding === 0 && verticalAlign === 'top') {
     return base

@@ -17,24 +17,31 @@ const defaultProps = {
   strokeThickness: 0,
   originX: 0,
   originY: 0,
+  rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 function create(scene, props) {
-  const { x, y, width, height, color, strokeColor, strokeThickness, originX, originY } = props
+  const { x, y, width, height, color, strokeColor, strokeThickness, originX, originY, rotation, flipX, flipY } =
+    props
   return scene.add
     .ellipse(x, y, width, height, color)
     .setStrokeStyle(strokeThickness, strokeColor)
     .setOrigin(originX, originY)
+    .setAngle(rotation)
+    .setScale(flipX ? -1 : 1, flipY ? -1 : 1)
 }
 
 // Mirrors create() exactly, same reason as every other component's
 // generateCode — the exported game must render pixel-identical to the
 // editor.
 function generateCode({ props }) {
-  const { name, x, y, width, height, color, strokeColor, strokeThickness, originX, originY } = props
+  const { name, x, y, width, height, color, strokeColor, strokeThickness, originX, originY, rotation, flipX, flipY } =
+    props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
-  return `this.${name} = scene.add.ellipse(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY});`
+  return `this.${name} = scene.add.ellipse(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)}).setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`
 }
 
 // Unlike Panel/Ligne's own toPolygonPoints (their real render bounds ARE
@@ -46,19 +53,31 @@ function generateCode({ props }) {
 // visual benefit.
 const CIRCLE_TESSELLATION_POINTS = 32
 
+// Tessellated in *local* space (relative to the object's own origin, same
+// anchor its rotation pivots around) and transformed through the real
+// world matrix — same fix as Panel's own toPolygonPoints, for the same
+// reason: reading centerX/radiusX/radiusY off getBounds() (the original
+// version of this function, before rotation existed) gives the rotated
+// ellipse's axis-aligned *bounding box*, not its actual outline, which
+// only happens to look right for a circle (width === height) at any
+// angle — an actual ellipse rotated 45° would tessellate completely wrong.
 function toPolygonPoints(element) {
-  const bounds = element.gameObject.getBounds()
-  const centerX = bounds.centerX
-  const centerY = bounds.centerY
-  const radiusX = bounds.width / 2
-  const radiusY = bounds.height / 2
+  const { width, height, originX, originY } = element.props
+  const localCenterX = (0.5 - originX) * width
+  const localCenterY = (0.5 - originY) * height
+  const radiusX = width / 2
+  const radiusY = height / 2
+  const matrix = element.gameObject.getWorldTransformMatrix()
   const points = []
   for (let i = 0; i < CIRCLE_TESSELLATION_POINTS; i++) {
     const angle = (i / CIRCLE_TESSELLATION_POINTS) * Math.PI * 2
-    points.push({
-      x: centerX + Math.cos(angle) * radiusX,
-      y: centerY + Math.sin(angle) * radiusY,
-    })
+    const local = {
+      x: localCenterX + Math.cos(angle) * radiusX,
+      y: localCenterY + Math.sin(angle) * radiusY,
+    }
+    const world = {}
+    matrix.transformPoint(local.x, local.y, world)
+    points.push({ x: world.x, y: world.y })
   }
   return points
 }

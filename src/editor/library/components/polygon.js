@@ -21,6 +21,9 @@ const defaultProps = {
   strokeThickness: 0,
   originX: 0,
   originY: 0,
+  rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 // Points for a regular polygon/star, normalized to fit exactly inside a
@@ -51,12 +54,14 @@ function buildPolygonPoints(props) {
 }
 
 function create(scene, props) {
-  const { x, y, color, strokeColor, strokeThickness, originX, originY } = props
+  const { x, y, color, strokeColor, strokeThickness, originX, originY, rotation, flipX, flipY } = props
   const points = buildPolygonPoints(props)
   return scene.add
     .polygon(x, y, points, color)
     .setStrokeStyle(strokeThickness, strokeColor)
     .setOrigin(originX, originY)
+    .setAngle(rotation)
+    .setScale(flipX ? -1 : 1, flipY ? -1 : 1)
 }
 
 // Rebuilds the polygon's own points from current props — the live-canvas
@@ -69,11 +74,11 @@ function syncVisual(gameObject, props) {
 // export time rather than recomputed at runtime, same as every other
 // component's generateCode just embedding its own final numbers.
 function generateCode({ props }) {
-  const { name, x, y, color, strokeColor, strokeThickness, originX, originY } = props
+  const { name, x, y, color, strokeColor, strokeThickness, originX, originY, rotation, flipX, flipY } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
   const pointsLiteral = JSON.stringify(buildPolygonPoints(props))
-  return `this.${name} = scene.add.polygon(${Math.round(x)}, ${Math.round(y)}, ${pointsLiteral}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY});`
+  return `this.${name} = scene.add.polygon(${Math.round(x)}, ${Math.round(y)}, ${pointsLiteral}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)}).setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`
 }
 
 // Reads the actual rendered points straight off the live gameObject

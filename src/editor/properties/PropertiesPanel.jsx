@@ -43,6 +43,8 @@ export function PropertiesPanel({
   onSubtract,
   onIntersect,
   onExclude,
+  onFlipHorizontal,
+  onFlipVertical,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -815,6 +817,39 @@ export function PropertiesPanel({
                 onChange={handleStrokeColorChange}
               />
             </label>
+          </div>
+        </div>
+      )}
+
+      {'rotation' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Rotation</span>
+          <input
+            type="number"
+            value={Math.round(props.rotation)}
+            onChange={handleNumberChange('rotation')}
+          />
+        </div>
+      )}
+
+      {'flipX' in props && (
+        <div className="properties-panel__group">
+          <span className="properties-panel__group-label">Miroir</span>
+          <div className="properties-panel__row">
+            <button
+              type="button"
+              onClick={onFlipHorizontal}
+              className={props.flipX ? 'properties-panel__row-button--active' : ''}
+            >
+              Horizontal
+            </button>
+            <button
+              type="button"
+              onClick={onFlipVertical}
+              className={props.flipY ? 'properties-panel__row-button--active' : ''}
+            >
+              Vertical
+            </button>
           </div>
         </div>
       )}
