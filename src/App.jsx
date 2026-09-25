@@ -80,6 +80,10 @@ function App() {
     sceneRef.current?.ungroupSelected()
   }, [])
 
+  const handleEditPathPoints = useCallback((id) => {
+    sceneRef.current?.startEditingPathPoints(id)
+  }, [])
+
   const handleLinkAsStates = useCallback(() => {
     sceneRef.current?.linkAsStates()
   }, [])
@@ -205,6 +209,7 @@ function App() {
           onSetProgressBarIcon={handleSetProgressBarIcon}
           onSetImageButtonTexture={handleSetImageButtonTexture}
           onOpenStatePreview={handleOpenStatePreview}
+          onEditPathPoints={handleEditPathPoints}
         />
       </div>
 
