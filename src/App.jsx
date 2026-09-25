@@ -108,6 +108,10 @@ function App() {
     sceneRef.current?.divideSelected()
   }, [])
 
+  const handleConvertToPath = useCallback(() => {
+    sceneRef.current?.convertToPath()
+  }, [])
+
   const handleAssignStateRole = useCallback((id, childId, role) => {
     sceneRef.current?.assignStateRole(id, childId, role)
   }, [])
@@ -226,6 +230,7 @@ function App() {
           onIntersect={handleIntersect}
           onExclude={handleExclude}
           onDivide={handleDivide}
+          onConvertToPath={handleConvertToPath}
           onAssignStateRole={handleAssignStateRole}
           onAddChildToStateButton={handleAddChildToStateButton}
           onRemoveStateButtonChild={handleRemoveStateButtonChild}

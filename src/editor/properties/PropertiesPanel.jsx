@@ -39,6 +39,7 @@ export function PropertiesPanel({
   onSetImageButtonTexture,
   onOpenStatePreview,
   onEditPathPoints,
+  onConvertToPath,
   onUnion,
   onSubtract,
   onIntersect,
@@ -1053,6 +1054,15 @@ export function PropertiesPanel({
           Modifier les points
         </button>
       )}
+
+      {single.type !== 'path' &&
+        !single.parentId &&
+        typeof componentLibrary.find((component) => component.type === single.type)?.toPolygonPoints ===
+          'function' && (
+          <button type="button" className="properties-panel__group-button" onClick={onConvertToPath}>
+            Convertir en tracé
+          </button>
+        )}
 
       {!single.parentId && (
         <button type="button" className="properties-panel__group-button" onClick={onDuplicate}>
