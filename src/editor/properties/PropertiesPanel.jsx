@@ -41,6 +41,8 @@ export function PropertiesPanel({
   onEditPathPoints,
   onUnion,
   onSubtract,
+  onIntersect,
+  onExclude,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -172,6 +174,33 @@ export function PropertiesPanel({
           ) && (
             <button type="button" className="properties-panel__group-button" onClick={onSubtract}>
               Soustraction
+            </button>
+          )}
+
+        {/* Intersection: same eligibility gate as Union/Soustraction. */}
+        {elements.length === 2 &&
+          elements.every(
+            (element) =>
+              !element.parentId &&
+              typeof componentLibrary.find((component) => component.type === element.type)
+                ?.toPolygonPoints === 'function',
+          ) && (
+            <button type="button" className="properties-panel__group-button" onClick={onIntersect}>
+              Intersection
+            </button>
+          )}
+
+        {/* Exclusion (XOR): same eligibility gate as Union/Soustraction/
+            Intersection. */}
+        {elements.length === 2 &&
+          elements.every(
+            (element) =>
+              !element.parentId &&
+              typeof componentLibrary.find((component) => component.type === element.type)
+                ?.toPolygonPoints === 'function',
+          ) && (
+            <button type="button" className="properties-panel__group-button" onClick={onExclude}>
+              Exclusion
             </button>
           )}
 

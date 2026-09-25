@@ -1,6 +1,6 @@
 import Phaser from 'phaser'
 import { componentLibrary } from '../library/registry'
-import { unionPolygons, subtractPolygons } from '../geometry/booleanOps'
+import { unionPolygons, subtractPolygons, intersectPolygons, excludePolygons } from '../geometry/booleanOps'
 
 const SELECTION_COLOR = 0x60a5fa
 const HANDLE_SIZE = 10
@@ -982,6 +982,78 @@ export class EditorScene extends Phaser.Scene {
     } else {
       this.selectedIds = new Set()
     }
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Intersection (Pathfinder-style boolean op) — keeps only the overlapping
+  // area of the 2 selected shapes. Order doesn't matter (unlike
+  // Soustraction), but the result can still be 0 pieces (no overlap at
+  // all), 1 (the common case), or more (two shapes overlapping in more
+  // than one disjoint region) — createPathsFromResults handles all three
+  // the same way subtractSelected does.
+  intersectSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = intersectPolygons(pointsA, pointsB)
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same single-history-step bookkeeping as subtractSelected — see its
+    // own note just above.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    this.selectedIds = new Set(created.map((element) => element.id))
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Exclusion (Pathfinder-style boolean op, XOR) — keeps everything except
+  // the overlapping area: the two shapes minus their shared region. Order-
+  // independent like Intersection. Two overlapping shapes always produce
+  // exactly 2 disjoint pieces (each shape's own non-overlapping remainder);
+  // two non-overlapping shapes produce 2 pieces that are just the
+  // originals back — createPathsFromResults handles either uniformly.
+  excludeSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = excludePolygons(pointsA, pointsB)
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same single-history-step bookkeeping as subtractSelected/
+    // intersectSelected — see subtractSelected's own note.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    this.selectedIds = new Set(created.map((element) => element.id))
     this.drawSelection()
     this.commitHistory()
     this.events.emit('selectionchange', this.getSelectionSnapshot())
