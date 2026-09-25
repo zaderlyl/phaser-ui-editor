@@ -24,10 +24,12 @@ const defaultProps = {
   originX: 0,
   originY: 0,
   rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 function create(scene, props) {
-  const { x, y, width, height, originX, originY, rotation } = props
+  const { x, y, width, height, originX, originY, rotation, flipX, flipY } = props
   const left = x - originX * width
   const top = y - originY * height
   // Mirrors Bouton's own convention of rewriting props.x/y to the
@@ -39,6 +41,7 @@ function create(scene, props) {
   const container = scene.add.container(left, top)
   container.setSize(width, height)
   container.setAngle(rotation)
+  container.setScale(flipX ? -1 : 1, flipY ? -1 : 1)
   return container
 }
 

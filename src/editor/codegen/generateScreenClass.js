@@ -75,7 +75,7 @@ function formatScale(value) {
 // recoloring/retexturing one shared game object the way Bouton/Bouton
 // image do.
 function generateStateButtonCode(element, elements, indent) {
-  const { name, x, y, width, height, callback, rotation = 0 } = element.props
+  const { name, x, y, width, height, callback, rotation = 0, flipX = false, flipY = false } = element.props
   const containerRef = `this.${name}`
   const children = elements.filter((child) => child.parentId === element.id)
   const childLines = children.map((child) => generateEntryCode(child, elements, indent, containerRef))
@@ -114,6 +114,7 @@ function generateStateButtonCode(element, elements, indent) {
   lines.push(
     `${indent}this.${name}.setSize(${w}, ${h});`,
     `${indent}this.${name}.setAngle(${Math.round(rotation)});`,
+    `${indent}this.${name}.setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`,
     // Same fix as EditorScene.makeInteractive, reproduced here since this
     // is standalone generated code with no scene helper to call: a
     // Container's displayOrigin is a fixed, non-configurable 0.5, and

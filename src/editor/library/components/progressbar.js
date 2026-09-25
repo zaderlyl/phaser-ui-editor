@@ -108,6 +108,8 @@ const defaultProps = {
   originX: 0,
   originY: 0,
   rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 // 0-1, clamped so a value outside [minValue, maxValue] (typed in the
@@ -465,6 +467,8 @@ function create(scene, props) {
     originX,
     originY,
     rotation,
+    flipX,
+    flipY,
   } = props
 
   // Phaser's Graphics game object (needed below for rounded corners) has
@@ -516,6 +520,7 @@ function create(scene, props) {
   const container = scene.add.container(left, top, [boundsZone, background, fill, label])
   container.setSize(width, height)
   container.setAngle(rotation)
+  container.setScale(flipX ? -1 : 1, flipY ? -1 : 1)
   container.setVisible(visible)
   container.setData('boundsZone', boundsZone)
   container.setData('background', background)
@@ -684,6 +689,8 @@ function generateCode({ props }) {
     labelFontSize,
     visible,
     rotation,
+    flipX,
+    flipY,
   } = props
 
   const hexBackground = `0x${backgroundColor.toString(16).padStart(6, '0')}`
@@ -726,6 +733,7 @@ function generateCode({ props }) {
   lines.push(`this.${name}.add([${children.join(', ')}]);`)
   lines.push(`this.${name}.setSize(${w}, ${h});`)
   lines.push(`this.${name}.setAngle(${Math.round(rotation)});`)
+  lines.push(`this.${name}.setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`)
 
   const geoExpr = fillGeometryExpr(width, height, padding, orientation, direction)
   const setValueBody = [

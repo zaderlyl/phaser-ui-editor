@@ -29,13 +29,15 @@ const defaultProps = {
   originX: 0,
   originY: 0,
   rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 const LABEL_FONT_SIZE = 18
 const LABEL_COLOR = '#ffffff'
 
 function create(scene, props) {
-  const { x, y, width, height, color, strokeColor, strokeThickness, text, originX, originY, rotation } =
+  const { x, y, width, height, color, strokeColor, strokeThickness, text, originX, originY, rotation, flipX, flipY } =
     props
 
   const background = scene.add
@@ -64,6 +66,7 @@ function create(scene, props) {
   const container = scene.add.container(left, top, [background, label])
   container.setSize(width, height)
   container.setAngle(rotation)
+  container.setScale(flipX ? -1 : 1, flipY ? -1 : 1)
   container.setData('background', background)
   container.setData('label', label)
   return container
@@ -105,6 +108,8 @@ function generateCode({ props }) {
     hoverCallback,
     hoverOutCallback,
     rotation,
+    flipX,
+    flipY,
   } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
@@ -155,6 +160,7 @@ function generateCode({ props }) {
   return [
     `this.${name} = new Phaser.GameObjects.Container(scene, ${Math.round(x)}, ${Math.round(y)});`,
     `this.${name}.setAngle(${Math.round(rotation)});`,
+    `this.${name}.setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`,
     `this.${name}Background = scene.add.rectangle(0, 0, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(0, 0);`,
     `this.${name}Label = scene.add.text(${Math.round(width) / 2}, ${Math.round(height) / 2}, '${escapedText}', { fontSize: '${LABEL_FONT_SIZE}px', color: '${LABEL_COLOR}' }).setOrigin(0.5, 0.5);`,
     `this.${name}.add([this.${name}Background, this.${name}Label]);`,

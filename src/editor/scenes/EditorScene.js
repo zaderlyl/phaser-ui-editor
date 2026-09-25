@@ -2505,6 +2505,28 @@ export class EditorScene extends Phaser.Scene {
     return { originX: element.props.originX ?? 0, originY: element.props.originY ?? 0 }
   }
 
+  // flipX/flipY render one of two completely different ways depending on
+  // the component (see applyFlip): a component with Phaser's own Flip
+  // component (Text, Image, Bouton image — texture/canvas-sampled content,
+  // confirmed empirically that Text has it too in this Phaser version, not
+  // just Image) mirrors its content *within* its own unchanged bounding
+  // box, at the texture-sampling level — position, origin and bounds are
+  // completely untouched, so no geometry compensation is needed at all.
+  // Everything else (Shape, Polygon, Container) has no such component, so
+  // flipping there means a literal -1 scale instead (applyFlip's fallback)
+  // — and Phaser applies scale to the SAME local coordinates setOrigin
+  // anchors, so it mirrors content across the anchor line, not across the
+  // shape's own center (those only coincide when the anchor already sits
+  // at the center, i.e. originX/Y 0.5). Every local-geometry helper below
+  // that measures a point relative to the anchor — the rotation pivot, the
+  // real corners — has to fold this in for the scale-based case, or a
+  // flipped shape's computed center/corners drift to where they'd be
+  // *without* the flip instead of where the shape actually renders.
+  getEffectiveScale(element) {
+    if (typeof element.gameObject.setFlip === 'function') return { sx: 1, sy: 1 }
+    return { sx: element.props.flipX ? -1 : 1, sy: element.props.flipY ? -1 : 1 }
+  }
+
   // The point a shape's rotation actually pivots around, in local
   // (world, or group-local for a grouped child — same frame props.x/y
   // already live in) coordinates: the middle of its own width/height box,
@@ -2523,9 +2545,10 @@ export class EditorScene extends Phaser.Scene {
   // already overwritten by then).
   computeCenterFromState(element, angleDeg, posX, posY) {
     const { originX, originY } = this.getEffectiveOrigin(element)
+    const { sx, sy } = this.getEffectiveScale(element)
     const { width, height } = element.props
-    const localCenterX = (0.5 - originX) * width
-    const localCenterY = (0.5 - originY) * height
+    const localCenterX = (0.5 - originX) * width * sx
+    const localCenterY = (0.5 - originY) * height * sy
     const rad = Phaser.Math.DegToRad(angleDeg)
     return {
       x: posX + localCenterX * Math.cos(rad) - localCenterY * Math.sin(rad),
@@ -2543,9 +2566,10 @@ export class EditorScene extends Phaser.Scene {
   // repeated ticks don't drift).
   rotateElementTo(element, newRotationDeg, center) {
     const { originX, originY } = this.getEffectiveOrigin(element)
+    const { sx, sy } = this.getEffectiveScale(element)
     const { width, height } = element.props
-    const localCenterX = (0.5 - originX) * width
-    const localCenterY = (0.5 - originY) * height
+    const localCenterX = (0.5 - originX) * width * sx
+    const localCenterY = (0.5 - originY) * height * sy
     const rad = Phaser.Math.DegToRad(newRotationDeg)
     const offsetX = localCenterX * Math.cos(rad) - localCenterY * Math.sin(rad)
     const offsetY = localCenterX * Math.sin(rad) + localCenterY * Math.cos(rad)
@@ -2592,19 +2616,68 @@ export class EditorScene extends Phaser.Scene {
   getRotatedCorners(element) {
     const { x, y, width, height, rotation } = element.props
     const { originX, originY } = this.getEffectiveOrigin(element)
+    const { sx, sy } = this.getEffectiveScale(element)
     const rad = Phaser.Math.DegToRad(rotation ?? 0)
     const cos = Math.cos(rad)
     const sin = Math.sin(rad)
     const localCorners = [
-      { x: -originX * width, y: -originY * height },
-      { x: (1 - originX) * width, y: -originY * height },
-      { x: (1 - originX) * width, y: (1 - originY) * height },
-      { x: -originX * width, y: (1 - originY) * height },
+      { x: -originX * width * sx, y: -originY * height * sy },
+      { x: (1 - originX) * width * sx, y: -originY * height * sy },
+      { x: (1 - originX) * width * sx, y: (1 - originY) * height * sy },
+      { x: -originX * width * sx, y: (1 - originY) * height * sy },
     ]
     return localCorners.map((corner) => ({
       x: x + corner.x * cos - corner.y * sin,
       y: y + corner.x * sin + corner.y * cos,
     }))
+  }
+
+  // Applies a component's current flipX/flipY props to its real gameObject.
+  // An Image/Bouton image has Phaser's own dedicated Flip component
+  // (setFlip) — used when available since it's the more direct, purpose-
+  // built API. Every other type here (Shape, Polygon, Text, Container)
+  // has no such component, so a mirror is done the same way Illustrator's
+  // own "flip" ultimately renders one: negating scale on that axis. Safe
+  // to call for any component type, since resizeRotatedElement/etc. never
+  // touch scale themselves — nothing else in this editor uses it for a
+  // non-group individual element.
+  applyFlip(element) {
+    const { gameObject, props } = element
+    if (typeof gameObject.setFlip === 'function') {
+      gameObject.setFlip(props.flipX, props.flipY)
+    } else {
+      gameObject.setScale(props.flipX ? -1 : 1, props.flipY ? -1 : 1)
+    }
+  }
+
+  // Mirrors the single selected element horizontally ('x') or vertically
+  // ('y') in place — same "stays where it is" expectation as rotating in
+  // place, rather than the shape jumping to the other side of its origin
+  // anchor the way a raw negated scale would on its own (negating scale
+  // mirrors content across the anchor line, not across the footprint's own
+  // center, unless they already coincide — see getEffectiveScale's own
+  // note). Reuses getElementCenter/rotateElementTo rather than working out
+  // its own position delta: capture the center under the OLD flip state,
+  // toggle the flip, then ask rotateElementTo to re-solve x/y for that same
+  // center under the NEW flip state (rotateElementTo's own local-center
+  // math already folds in getEffectiveScale) — the "same rotation, only
+  // scale changed" case of exactly the same problem rotating in place
+  // already solves.
+  flipSelected(axis) {
+    const selected = this.elements.filter((element) => this.selectedIds.has(element.id))
+    if (selected.length !== 1) return
+    const element = selected[0]
+    if (!('rotation' in element.props)) return
+
+    const propKey = axis === 'x' ? 'flipX' : 'flipY'
+    const center = this.getElementCenter(element)
+    element.props[propKey] = !element.props[propKey]
+    this.rotateElementTo(element, element.props.rotation, center)
+    this.applyFlip(element)
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(element.id))
+    this.commitHistory()
   }
 
   // Resizes the whole selection so the dragged corner follows the pointer
@@ -2687,10 +2760,14 @@ export class EditorScene extends Phaser.Scene {
     // NEW width/height, since origin is a *fraction* of size (see
     // getRotatedCorners' identical formula): as the shape grows/shrinks,
     // an off-center origin's offset from that corner scales right along
-    // with it.
+    // with it. Also folds in flipX/Y the same way getRotatedCorners does —
+    // without it, resizing a flipped shape would solve for the wrong
+    // anchor position (see getEffectiveScale's own note on why flip moves
+    // where local coordinates land relative to the anchor).
     const { originX, originY } = this.getEffectiveOrigin(element)
-    const fixedLocalX = anchorIsLeft ? -originX * newWidth : (1 - originX) * newWidth
-    const fixedLocalY = anchorIsTop ? -originY * newHeight : (1 - originY) * newHeight
+    const { sx, sy } = this.getEffectiveScale(element)
+    const fixedLocalX = (anchorIsLeft ? -originX * newWidth : (1 - originX) * newWidth) * sx
+    const fixedLocalY = (anchorIsTop ? -originY * newHeight : (1 - originY) * newHeight) * sy
     const newAnchorX = fixedWorld.x - (fixedLocalX * cos - fixedLocalY * sin)
     const newAnchorY = fixedWorld.y - (fixedLocalX * sin + fixedLocalY * cos)
 

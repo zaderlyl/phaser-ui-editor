@@ -18,25 +18,30 @@ const defaultProps = {
   originX: 0,
   originY: 0,
   rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 function create(scene, props) {
-  const { x, y, width, height, color, strokeColor, strokeThickness, originX, originY, rotation } = props
+  const { x, y, width, height, color, strokeColor, strokeThickness, originX, originY, rotation, flipX, flipY } =
+    props
   return scene.add
     .ellipse(x, y, width, height, color)
     .setStrokeStyle(strokeThickness, strokeColor)
     .setOrigin(originX, originY)
     .setAngle(rotation)
+    .setScale(flipX ? -1 : 1, flipY ? -1 : 1)
 }
 
 // Mirrors create() exactly, same reason as every other component's
 // generateCode — the exported game must render pixel-identical to the
 // editor.
 function generateCode({ props }) {
-  const { name, x, y, width, height, color, strokeColor, strokeThickness, originX, originY, rotation } = props
+  const { name, x, y, width, height, color, strokeColor, strokeThickness, originX, originY, rotation, flipX, flipY } =
+    props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
   const hexStrokeColor = `0x${strokeColor.toString(16).padStart(6, '0')}`
-  return `this.${name} = scene.add.ellipse(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)});`
+  return `this.${name} = scene.add.ellipse(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)}).setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`
 }
 
 // Unlike Panel/Ligne's own toPolygonPoints (their real render bounds ARE

@@ -104,6 +104,14 @@ function App() {
     sceneRef.current?.excludeSelected()
   }, [])
 
+  const handleFlipHorizontal = useCallback(() => {
+    sceneRef.current?.flipSelected('x')
+  }, [])
+
+  const handleFlipVertical = useCallback(() => {
+    sceneRef.current?.flipSelected('y')
+  }, [])
+
   const handleAssignStateRole = useCallback((id, childId, role) => {
     sceneRef.current?.assignStateRole(id, childId, role)
   }, [])
@@ -221,6 +229,8 @@ function App() {
           onSubtract={handleSubtract}
           onIntersect={handleIntersect}
           onExclude={handleExclude}
+          onFlipHorizontal={handleFlipHorizontal}
+          onFlipVertical={handleFlipVertical}
           onAssignStateRole={handleAssignStateRole}
           onAddChildToStateButton={handleAddChildToStateButton}
           onRemoveStateButtonChild={handleRemoveStateButtonChild}

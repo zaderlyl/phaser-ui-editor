@@ -10,12 +10,18 @@ const defaultProps = {
   originX: 0,
   originY: 0,
   rotation: 0,
+  flipX: false,
+  flipY: false,
 }
 
 // addElement() always calls this with props already merged over defaultProps.
 function create(scene, props) {
-  const { x, y, width, height, color, originX, originY, rotation } = props
-  return scene.add.rectangle(x, y, width, height, color).setOrigin(originX, originY).setAngle(rotation)
+  const { x, y, width, height, color, originX, originY, rotation, flipX, flipY } = props
+  return scene.add
+    .rectangle(x, y, width, height, color)
+    .setOrigin(originX, originY)
+    .setAngle(rotation)
+    .setScale(flipX ? -1 : 1, flipY ? -1 : 1)
 }
 
 // Generates the constructor line for this element in the exported screen
@@ -24,9 +30,9 @@ function create(scene, props) {
 // to match. Coordinates are rounded (drag/resize can leave sub-pixel
 // values) and the color is written as a 0x hex literal.
 function generateCode({ props }) {
-  const { name, x, y, width, height, color, originX, originY, rotation } = props
+  const { name, x, y, width, height, color, originX, originY, rotation, flipX, flipY } = props
   const hexColor = `0x${color.toString(16).padStart(6, '0')}`
-  return `this.${name} = scene.add.rectangle(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)});`
+  return `this.${name} = scene.add.rectangle(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setOrigin(${originX}, ${originY}).setAngle(${Math.round(rotation)}).setScale(${flipX ? -1 : 1}, ${flipY ? -1 : 1});`
 }
 
 // Its own contour as world-space points — the "any shape as a polygon"
