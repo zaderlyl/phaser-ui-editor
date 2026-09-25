@@ -28,10 +28,31 @@ function generateCode({ props }) {
   return `this.${name} = scene.add.rectangle(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setOrigin(${originX}, ${originY});`
 }
 
+// Its own contour as world-space points — the "any shape as a polygon"
+// representation the future boolean-op actions (Union/Soustraction/
+// Intersection/Exclusion) will need to treat every shape type uniformly,
+// regardless of how each one actually renders. Panel is already an
+// axis-aligned rectangle, so its own real render bounds (gameObject.
+// getBounds(), which already accounts for origin the same way every
+// other geometry query in this app does — see e.g. reparentToScene's own
+// note) give the 4 corners directly, no extra math needed. Every other
+// shape type gets this same hook, tessellated however its own geometry
+// requires (see Cercle's own note once that one exists).
+function toPolygonPoints(element) {
+  const bounds = element.gameObject.getBounds()
+  return [
+    { x: bounds.left, y: bounds.top },
+    { x: bounds.right, y: bounds.top },
+    { x: bounds.right, y: bounds.bottom },
+    { x: bounds.left, y: bounds.bottom },
+  ]
+}
+
 export const panelComponent = {
   type: 'panel',
   label: 'Panel',
   defaultProps,
   create,
   generateCode,
+  toPolygonPoints,
 }
