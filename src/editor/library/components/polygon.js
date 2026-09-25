@@ -76,6 +76,26 @@ function generateCode({ props }) {
   return `this.${name} = scene.add.polygon(${Math.round(x)}, ${Math.round(y)}, ${pointsLiteral}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY});`
 }
 
+// Reads the actual rendered points straight off the live gameObject
+// (geom.points, in its own local space) and maps each one through its
+// real world transform matrix, rather than recomputing world points from
+// props.x/y + buildPolygonPoints — the same "trust the render, not a
+// recomputation" philosophy Panel/Cercle's own toPolygonPoints already
+// follow via getBounds(). The difference here is what it buys: a matrix
+// transform (unlike a plain bounds read) also correctly accounts for an
+// ancestor Container's own scale — e.g. a Polygone inside a group that's
+// been resized (see resizeSelected's own group branch, which stretches
+// via setScale rather than touching each child's own props) — so this
+// stays correct even nested, not just for a top-level shape.
+function toPolygonPoints(element) {
+  const matrix = element.gameObject.getWorldTransformMatrix()
+  return element.gameObject.geom.points.map((point) => {
+    const world = {}
+    matrix.transformPoint(point.x, point.y, world)
+    return { x: world.x, y: world.y }
+  })
+}
+
 export const polygonComponent = {
   type: 'polygon',
   label: 'Polygone',
@@ -83,4 +103,5 @@ export const polygonComponent = {
   create,
   syncVisual,
   generateCode,
+  toPolygonPoints,
 }
