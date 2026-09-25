@@ -40,6 +40,7 @@ export function PropertiesPanel({
   onOpenStatePreview,
   onEditPathPoints,
   onUnion,
+  onSubtract,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -156,6 +157,21 @@ export function PropertiesPanel({
           ) && (
             <button type="button" className="properties-panel__group-button" onClick={onUnion}>
               Union
+            </button>
+          )}
+
+        {/* Soustraction: same eligibility gate as Union — cuts the front
+            shape (the second selected, since elements arrive in back-to-
+            front order) out of the back one. */}
+        {elements.length === 2 &&
+          elements.every(
+            (element) =>
+              !element.parentId &&
+              typeof componentLibrary.find((component) => component.type === element.type)
+                ?.toPolygonPoints === 'function',
+          ) && (
+            <button type="button" className="properties-panel__group-button" onClick={onSubtract}>
+              Soustraction
             </button>
           )}
 
