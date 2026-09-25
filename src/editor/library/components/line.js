@@ -20,4 +20,8 @@ export const lineComponent = {
   defaultProps,
   create: panelComponent.create,
   generateCode: panelComponent.generateCode,
+  // Same rectangle, same 4-corners-from-real-bounds logic — reused
+  // directly rather than reimplemented, same reasoning as create()/
+  // generateCode() above.
+  toPolygonPoints: panelComponent.toPolygonPoints,
 }

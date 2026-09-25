@@ -59,6 +59,19 @@ function generateCode({ props }) {
   return `this.${name} = scene.add.polygon(${Math.round(x)}, ${Math.round(y)}, ${pointsLiteral}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY});`
 }
 
+// Same technique as Polygone's own toPolygonPoints: reads the actual
+// rendered points off the live gameObject and maps each one through its
+// real world transform matrix, rather than recomputing world points from
+// props — stays correct even for a Tracé nested inside a resized group.
+function toPolygonPoints(element) {
+  const matrix = element.gameObject.getWorldTransformMatrix()
+  return element.gameObject.geom.points.map((point) => {
+    const world = {}
+    matrix.transformPoint(point.x, point.y, world)
+    return { x: world.x, y: world.y }
+  })
+}
+
 export const pathComponent = {
   type: 'path',
   label: 'Tracé',
@@ -66,4 +79,5 @@ export const pathComponent = {
   create,
   syncVisual,
   generateCode,
+  toPolygonPoints,
 }
