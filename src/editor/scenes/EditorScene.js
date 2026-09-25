@@ -1059,6 +1059,51 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
+  // Diviser (Pathfinder-style boolean op) — splits the 2 selected shapes
+  // into every distinct region their outlines carve out: what's only in A,
+  // what's only in B, and what's shared by both. Unlike Union/Soustraction/
+  // Intersection/Exclusion, polygon-clipping has no single primitive for
+  // this — it's built here from the same 3 pairwise ops those already use
+  // (subtract twice, plus intersect once), each one already handling the
+  // 0-or-1-or-several-pieces case on its own; concatenating their results
+  // is exactly "every resulting region", up to 3 pieces total (or fewer if
+  // the shapes don't overlap: one of the subtracts degenerates to a no-op
+  // copy and the intersection comes back empty). Order-independent, same
+  // as Intersection/Exclusion.
+  divideSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = [
+      ...subtractPolygons(pointsA, pointsB),
+      ...subtractPolygons(pointsB, pointsA),
+      ...intersectPolygons(pointsA, pointsB),
+    ]
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same single-history-step bookkeeping as Soustraction/Intersection/
+    // Exclusion — see subtractSelected's own note.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    this.selectedIds = new Set(created.map((element) => element.id))
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
   // Pen tool, step 1 of 2 (finishing/cancelling a path comes later): enters
   // point-placement mode. The current selection is cleared first since a
   // click while drawing means "place a point", not "select this instead".

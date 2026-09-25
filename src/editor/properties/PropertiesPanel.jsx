@@ -43,6 +43,7 @@ export function PropertiesPanel({
   onSubtract,
   onIntersect,
   onExclude,
+  onDivide,
 }) {
   const single = elements.length === 1 ? elements[0] : null
 
@@ -201,6 +202,20 @@ export function PropertiesPanel({
           ) && (
             <button type="button" className="properties-panel__group-button" onClick={onExclude}>
               Exclusion
+            </button>
+          )}
+
+        {/* Diviser: same eligibility gate as Union/Soustraction/
+            Intersection/Exclusion. */}
+        {elements.length === 2 &&
+          elements.every(
+            (element) =>
+              !element.parentId &&
+              typeof componentLibrary.find((component) => component.type === element.type)
+                ?.toPolygonPoints === 'function',
+          ) && (
+            <button type="button" className="properties-panel__group-button" onClick={onDivide}>
+              Diviser
             </button>
           )}
 

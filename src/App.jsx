@@ -104,6 +104,10 @@ function App() {
     sceneRef.current?.excludeSelected()
   }, [])
 
+  const handleDivide = useCallback(() => {
+    sceneRef.current?.divideSelected()
+  }, [])
+
   const handleAssignStateRole = useCallback((id, childId, role) => {
     sceneRef.current?.assignStateRole(id, childId, role)
   }, [])
@@ -221,6 +225,7 @@ function App() {
           onSubtract={handleSubtract}
           onIntersect={handleIntersect}
           onExclude={handleExclude}
+          onDivide={handleDivide}
           onAssignStateRole={handleAssignStateRole}
           onAddChildToStateButton={handleAddChildToStateButton}
           onRemoveStateButtonChild={handleRemoveStateButtonChild}
