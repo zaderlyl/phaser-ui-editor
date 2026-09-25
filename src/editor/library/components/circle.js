@@ -37,10 +37,37 @@ function generateCode({ props }) {
   return `this.${name} = scene.add.ellipse(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)}, ${hexColor}).setStrokeStyle(${strokeThickness}, ${hexStrokeColor}).setOrigin(${originX}, ${originY});`
 }
 
+// Unlike Panel/Ligne's own toPolygonPoints (their real render bounds ARE
+// their 4 corners), an ellipse has no finite point list to read off — it
+// has to be approximated by walking evenly-spaced angles around it and
+// sampling a point at each one. 32 points is smooth enough to not visibly
+// look faceted at any size this editor places shapes at, without being
+// so many that a later boolean-op clip against it gets slow for no
+// visual benefit.
+const CIRCLE_TESSELLATION_POINTS = 32
+
+function toPolygonPoints(element) {
+  const bounds = element.gameObject.getBounds()
+  const centerX = bounds.centerX
+  const centerY = bounds.centerY
+  const radiusX = bounds.width / 2
+  const radiusY = bounds.height / 2
+  const points = []
+  for (let i = 0; i < CIRCLE_TESSELLATION_POINTS; i++) {
+    const angle = (i / CIRCLE_TESSELLATION_POINTS) * Math.PI * 2
+    points.push({
+      x: centerX + Math.cos(angle) * radiusX,
+      y: centerY + Math.sin(angle) * radiusY,
+    })
+  }
+  return points
+}
+
 export const circleComponent = {
   type: 'circle',
   label: 'Cercle',
   defaultProps,
   create,
   generateCode,
+  toPolygonPoints,
 }
