@@ -403,8 +403,32 @@ export class EditorScene extends Phaser.Scene {
         const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
         if (elements.length === 0) return
 
-        const bounds = this.getBoundsUnion(elements)
         const corner = gameObject.getData('corner')
+
+        // A single element that can be rotated resizes along its own
+        // (possibly rotated) local axes instead of the world's — see
+        // resizeRotatedElement's own note. Multi-select and groups keep
+        // the plain axis-aligned path below unconditionally (rotating a
+        // whole group's worth of independently-positioned children is its
+        // own future problem, not needed to resize one shape at a time).
+        if (elements.length === 1 && 'rotation' in elements[0].props) {
+          const element = elements[0]
+          const corners = this.getRotatedCorners(element)
+          const oppositeIndex = { tl: 2, tr: 3, br: 0, bl: 1 }[corner]
+          this.resizeRotationSnapshot = {
+            element,
+            corner,
+            fixedWorld: corners[oppositeIndex],
+            rotation: element.props.rotation ?? 0,
+            startWidth: element.props.width,
+            startHeight: element.props.height,
+          }
+          this.resizeSnapshot = null
+          return
+        }
+        this.resizeRotationSnapshot = null
+
+        const bounds = this.getBoundsUnion(elements)
         gameObject.setData('fixedX', corner.includes('r') ? bounds.left : bounds.right)
         gameObject.setData('fixedY', corner.includes('b') ? bounds.top : bounds.bottom)
 
@@ -503,7 +527,11 @@ export class EditorScene extends Phaser.Scene {
       }
 
       if (gameObject.getData('isHandle')) {
-        this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey, !!pointer.event?.altKey)
+        if (this.resizeRotationSnapshot) {
+          this.resizeRotatedElement(dragX, dragY, !!pointer.event?.shiftKey)
+        } else {
+          this.resizeSelected(gameObject, dragX, dragY, !!pointer.event?.shiftKey, !!pointer.event?.altKey)
+        }
         return
       }
 
@@ -590,6 +618,7 @@ export class EditorScene extends Phaser.Scene {
 
     this.input.on('dragend', (pointer, gameObject) => {
       this.groupDragRedirect = null
+      this.resizeRotationSnapshot = null
       this.snapGuides.clear()
       if (gameObject === this.background) {
         this.marqueeGraphics.clear()
@@ -2609,6 +2638,88 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('elementchange', this.getElementSnapshot(element.id))
   }
 
+  // Local-axis resize for a single rotated element (see the 'isHandle'
+  // dragstart branch, which only takes this path for a single element that
+  // declares 'rotation' — every other case keeps the plain axis-aligned
+  // resizeSelected below unchanged). Rotating the pointer's own movement
+  // into the shape's local (unrotated) frame — rather than working in
+  // world axes like resizeSelected does — is what makes a corner drag keep
+  // the OPPOSITE corner fixed in world space even though the shape itself
+  // is tilted: the fixed corner's world position was captured once at
+  // dragstart (this.resizeRotationSnapshot.fixedWorld) and the rotation
+  // angle never changes during a resize, so every tick just re-derives
+  // width/height/position from that same fixed reference, exactly the way
+  // resizeSelected re-derives from its own fixedX/fixedY each tick.
+  resizeRotatedElement(pointerX, pointerY, keepAspectRatio) {
+    const snapshot = this.resizeRotationSnapshot
+    if (!snapshot) return
+    const { element, corner, fixedWorld, rotation, startWidth, startHeight } = snapshot
+
+    const rad = Phaser.Math.DegToRad(rotation)
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+    // Un-rotating (pointer - fixedCorner) by the shape's own angle gives,
+    // directly, how far the dragged corner has moved from the fixed one
+    // *along the shape's own width/height axes* — the same role dragX/
+    // dragY minus fixedX/fixedY plays in resizeSelected's plain world-axis
+    // version.
+    const dx = pointerX - fixedWorld.x
+    const dy = pointerY - fixedWorld.y
+    const localX = dx * cos + dy * sin
+    const localY = -dx * sin + dy * cos
+
+    const anchorIsLeft = corner.includes('r')
+    const anchorIsTop = corner.includes('b')
+    const rawWidth = Math.max(MIN_ELEMENT_SIZE, anchorIsLeft ? localX : -localX)
+    const rawHeight = Math.max(MIN_ELEMENT_SIZE, anchorIsTop ? localY : -localY)
+
+    let scaleX = rawWidth / startWidth
+    let scaleY = rawHeight / startHeight
+    if (keepAspectRatio) {
+      const uniformScale = Math.max(scaleX, scaleY)
+      scaleX = uniformScale
+      scaleY = uniformScale
+    }
+    const newWidth = Math.max(MIN_ELEMENT_SIZE, startWidth * scaleX)
+    const newHeight = Math.max(MIN_ELEMENT_SIZE, startHeight * scaleY)
+
+    // Where the (now resized) fixed corner sits in local space — using the
+    // NEW width/height, since origin is a *fraction* of size (see
+    // getRotatedCorners' identical formula): as the shape grows/shrinks,
+    // an off-center origin's offset from that corner scales right along
+    // with it.
+    const { originX, originY } = this.getEffectiveOrigin(element)
+    const fixedLocalX = anchorIsLeft ? -originX * newWidth : (1 - originX) * newWidth
+    const fixedLocalY = anchorIsTop ? -originY * newHeight : (1 - originY) * newHeight
+    const newAnchorX = fixedWorld.x - (fixedLocalX * cos - fixedLocalY * sin)
+    const newAnchorY = fixedWorld.y - (fixedLocalX * sin + fixedLocalY * cos)
+
+    const { gameObject } = element
+    element.props.width = newWidth
+    element.props.height = newHeight
+    element.props.x = newAnchorX
+    element.props.y = newAnchorY
+
+    if (gameObject.type === 'Container') {
+      gameObject.setSize(newWidth, newHeight)
+      this.syncCompositeVisual(element)
+    } else if (typeof gameObject.setFixedSize === 'function') {
+      gameObject.setFixedSize(newWidth, newHeight)
+      this.applyTextLayout(element)
+      this.syncCompositeVisual(element)
+    } else if (typeof gameObject.setDisplaySize === 'function') {
+      gameObject.setDisplaySize(newWidth, newHeight)
+      this.syncCompositeVisual(element)
+    } else {
+      gameObject.setSize(newWidth, newHeight)
+      this.syncCompositeVisual(element)
+    }
+    gameObject.setPosition(newAnchorX, newAnchorY)
+
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(element.id))
+  }
+
   resizeSelected(handle, dragX, dragY, keepAspectRatio = false, disableSnap = false) {
     if (!this.resizeSnapshot || this.resizeSnapshot.length === 0) return
 
@@ -2898,6 +3009,11 @@ export class EditorScene extends Phaser.Scene {
     if (singleRotatable) {
       const corners = this.getRotatedCorners(selected[0])
       this.selectionGraphics.strokePoints(corners, true)
+      // Resize handles sit on the shape's own real (rotated) corners too —
+      // not the axis-aligned groupBounds below — so dragging one resizes
+      // along the shape's own tilted axes (see resizeRotatedElement)
+      // instead of the world's.
+      this.positionHandlesAtCorners(corners)
     } else {
       this.selectionGraphics.strokeRect(
         groupBounds.left,
@@ -2905,8 +3021,8 @@ export class EditorScene extends Phaser.Scene {
         groupBounds.width,
         groupBounds.height,
       )
+      this.positionHandles(groupBounds)
     }
-    this.positionHandles(groupBounds)
     this.setHandlesVisible(true)
 
     if (singleRotatable) {
@@ -2970,6 +3086,18 @@ export class EditorScene extends Phaser.Scene {
     for (const handle of this.resizeHandles) {
       const [x, y] = positions[handle.getData('corner')]
       handle.setPosition(x, y)
+    }
+  }
+
+  // Same as positionHandles, but from the shape's own real rotated corners
+  // (see getRotatedCorners' [tl, tr, br, bl] ordering) rather than an
+  // axis-aligned bounds object — used for a single rotatable element's
+  // selection (see drawSelection).
+  positionHandlesAtCorners(corners) {
+    const positions = { tl: corners[0], tr: corners[1], br: corners[2], bl: corners[3] }
+    for (const handle of this.resizeHandles) {
+      const pos = positions[handle.getData('corner')]
+      handle.setPosition(pos.x, pos.y)
     }
   }
 
