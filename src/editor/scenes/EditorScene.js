@@ -12,6 +12,13 @@ const HANDLE_SIZE = 10
 const HANDLE_HIT_PADDING = 8
 const MIN_ELEMENT_SIZE = 10
 const CORNERS = ['tl', 'tr', 'bl', 'br']
+// How far outside the shape's own top-right corner the rotate handle sits,
+// along the diagonal away from center — far enough to read as clearly
+// separate from the resize handle sitting right on that same corner.
+const ROTATE_HANDLE_OFFSET = 20
+// Shift-dragging the rotate handle snaps to this many degrees at a time —
+// same convention as most design tools' own angle-snap modifier.
+const ROTATE_SNAP_DEGREES = 15
 // Matches a valid JS identifier — the generated code will use this name
 // directly as a property (this.<name>), so it must be a legal one.
 const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
@@ -200,6 +207,30 @@ export class EditorScene extends Phaser.Scene {
     this.linkHandle.input.enabled = false
     this.input.setDraggable(this.linkHandle)
 
+    // Illustrator-style corner rotate handle: sits diagonally outside the
+    // shape's own top-right corner (see positionRotateHandle), so it reads
+    // as clearly separate from the resize handle sitting right on that
+    // corner. Only ever shown for a single selected element that declares
+    // a 'rotation' prop (see drawSelection) — a rotation pivot only makes
+    // sense for one shape at a time, same restriction as the radius/link
+    // handles.
+    this.rotateHandle = this.add
+      .circle(0, 0, HANDLE_SIZE / 2, 0xffffff)
+      .setStrokeStyle(1, SELECTION_COLOR)
+      .setDepth(10001)
+      .setVisible(false)
+    this.rotateHandle.setData('isRotateHandle', true)
+    {
+      const hitSize = HANDLE_SIZE + HANDLE_HIT_PADDING * 2
+      this.rotateHandle.setInteractive({
+        hitArea: new Phaser.Geom.Rectangle(-hitSize / 2, -hitSize / 2, hitSize, hitSize),
+        hitAreaCallback: Phaser.Geom.Rectangle.Contains,
+        cursor: 'grab',
+      })
+    }
+    this.rotateHandle.input.enabled = false
+    this.input.setDraggable(this.rotateHandle)
+
     // The live line drawn from the handle to the pointer while dragging
     // it, plus a highlight around whatever valid drop target is currently
     // under the pointer — cleared on drop (see finishLinkDrag).
@@ -234,6 +265,7 @@ export class EditorScene extends Phaser.Scene {
         gameObject.getData('isHandle') ||
         gameObject.getData('isRadiusHandle') ||
         gameObject.getData('isLinkHandle') ||
+        gameObject.getData('isRotateHandle') ||
         gameObject.getData('isPathPointHandle')
       )
         return
@@ -347,6 +379,20 @@ export class EditorScene extends Phaser.Scene {
         return
       }
 
+      if (gameObject.getData('isRotateHandle')) {
+        const elements = this.elements.filter((el) => this.selectedIds.has(el.id))
+        if (elements.length !== 1 || !('rotation' in elements[0].props)) return
+        const element = elements[0]
+        const center = this.getElementCenter(element)
+        this.rotateDragElement = element
+        this.rotateDragCenter = center
+        this.rotateDragStartAngle = element.props.rotation
+        this.rotateDragStartPointerAngle = Phaser.Math.RadToDeg(
+          Phaser.Math.Angle.Between(center.x, center.y, pointer.x, pointer.y),
+        )
+        return
+      }
+
       // A path-point handle needs no snapshot at drag start — each point
       // moves entirely independently, no anchor/fixed-corner concept the
       // way a resize handle has (see 'drag's own branch for the actual
@@ -439,6 +485,11 @@ export class EditorScene extends Phaser.Scene {
 
       if (gameObject.getData('isLinkHandle')) {
         this.updateLinkDrag(pointer)
+        return
+      }
+
+      if (gameObject.getData('isRotateHandle')) {
+        this.updateRotationDrag(pointer, !!pointer.event?.shiftKey)
         return
       }
 
@@ -1989,10 +2040,14 @@ export class EditorScene extends Phaser.Scene {
       gameObject.setPosition(element.props.x, element.props.y)
     }
     if ('rotation' in patch) {
-      // Every gameObject type here (Shape, Polygon, Text, Container, Image)
-      // supports setAngle generically — no per-component branch needed, same
-      // as the position block just above.
-      gameObject.setAngle(element.props.rotation)
+      // Rotates in place around the shape's own visual center rather than
+      // its origin anchor (see getElementCenter/rotateElementTo's own
+      // notes) — the center is computed from gameObject's still-stale
+      // angle/x/y (Object.assign above already updated element.props, but
+      // the gameObject itself hasn't moved yet), i.e. the center *before*
+      // this edit, so it stays fixed across the change.
+      const center = this.computeCenterFromState(element, gameObject.angle, gameObject.x, gameObject.y)
+      this.rotateElementTo(element, element.props.rotation, center)
     }
     if ('width' in patch || 'height' in patch) {
       // A Rectangle's setSize() IS its visual size, but Text has its own
@@ -2407,6 +2462,122 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
+  // A Container-based component (Bouton, Barre de progression, Bouton
+  // composé) bakes its origin into props.x/y once, at create() time —
+  // props.x/y is always literal top-left from then on, and whatever
+  // originX/Y it was placed with is stale/unused afterward (see e.g.
+  // button.js's own note). Every other component keeps originX/Y live
+  // (Phaser's setOrigin actually shifts rendering continuously). Every
+  // local-geometry helper below (rotation center, corners) needs to know
+  // which convention applies, or a dropped-at-center Bouton would compute
+  // its pivot at its top-left instead of its real middle.
+  getEffectiveOrigin(element) {
+    if (element.gameObject.type === 'Container') return { originX: 0, originY: 0 }
+    return { originX: element.props.originX ?? 0, originY: element.props.originY ?? 0 }
+  }
+
+  // The point a shape's rotation actually pivots around, in local
+  // (world, or group-local for a grouped child — same frame props.x/y
+  // already live in) coordinates: the middle of its own width/height box,
+  // offset by its effective origin — NOT gameObject.x/y itself, which is
+  // the *origin anchor* (often the top-left corner) that Phaser's
+  // setAngle() actually rotates around. Rotating in place (see
+  // rotateElementTo below) means recomputing x/y on every angle change so
+  // this center point stays fixed instead.
+  getElementCenter(element) {
+    return this.computeCenterFromState(element, element.props.rotation ?? 0, element.props.x, element.props.y)
+  }
+
+  // Shared by getElementCenter (current props) and updateElementProps'
+  // rotation handler (which needs the center *before* an edit — computed
+  // from the gameObject's still-stale angle/x/y, since element.props was
+  // already overwritten by then).
+  computeCenterFromState(element, angleDeg, posX, posY) {
+    const { originX, originY } = this.getEffectiveOrigin(element)
+    const { width, height } = element.props
+    const localCenterX = (0.5 - originX) * width
+    const localCenterY = (0.5 - originY) * height
+    const rad = Phaser.Math.DegToRad(angleDeg)
+    return {
+      x: posX + localCenterX * Math.cos(rad) - localCenterY * Math.sin(rad),
+      y: posY + localCenterX * Math.sin(rad) + localCenterY * Math.cos(rad),
+    }
+  }
+
+  // Sets a new rotation angle while keeping a given world/local-frame
+  // center point fixed — the Illustrator-style "spins in place" feel,
+  // rather than swinging around whatever corner happens to be the
+  // origin anchor (see getElementCenter's own note). Used by both the
+  // properties panel's numeric field (updateElementProps, center computed
+  // from the *previous* angle/position) and the corner rotate handle's
+  // live drag (updateRotationDrag, center captured once at dragstart so
+  // repeated ticks don't drift).
+  rotateElementTo(element, newRotationDeg, center) {
+    const { originX, originY } = this.getEffectiveOrigin(element)
+    const { width, height } = element.props
+    const localCenterX = (0.5 - originX) * width
+    const localCenterY = (0.5 - originY) * height
+    const rad = Phaser.Math.DegToRad(newRotationDeg)
+    const offsetX = localCenterX * Math.cos(rad) - localCenterY * Math.sin(rad)
+    const offsetY = localCenterX * Math.sin(rad) + localCenterY * Math.cos(rad)
+    const newX = center.x - offsetX
+    const newY = center.y - offsetY
+
+    element.props.rotation = newRotationDeg
+    element.props.x = newX
+    element.props.y = newY
+    element.gameObject.setAngle(newRotationDeg)
+    element.gameObject.setPosition(newX, newY)
+  }
+
+  // Live drag tick for the corner rotate handle (see 'drag's own branch) —
+  // the new angle is the drag's starting angle plus however far the
+  // pointer has swept around the fixed center since dragstart, so the
+  // shape tracks the pointer's angular motion directly rather than
+  // snapping to point at the cursor. Shift rounds to the nearest
+  // ROTATE_SNAP_DEGREES, same modifier convention as every other snap in
+  // this editor.
+  updateRotationDrag(pointer, snap) {
+    const element = this.rotateDragElement
+    if (!element) return
+
+    const { x: cx, y: cy } = this.rotateDragCenter
+    const currentPointerAngle = Phaser.Math.RadToDeg(Phaser.Math.Angle.Between(cx, cy, pointer.x, pointer.y))
+    let newRotation = this.rotateDragStartAngle + (currentPointerAngle - this.rotateDragStartPointerAngle)
+    if (snap) newRotation = Math.round(newRotation / ROTATE_SNAP_DEGREES) * ROTATE_SNAP_DEGREES
+
+    this.rotateElementTo(element, newRotation, this.rotateDragCenter)
+    this.drawSelection()
+    this.events.emit('elementchange', this.getElementSnapshot(element.id))
+  }
+
+  // The shape's own real (rotated) 4 corners in world/local-frame space —
+  // used for both the selection outline (drawSelection) and positioning
+  // the rotate handle, so both always agree with how the shape actually
+  // renders. Local corners are computed the same origin-relative way as
+  // every other local-geometry helper here (see getElementCenter), then
+  // rotated by the current angle and translated by props.x/y — Phaser
+  // itself rotates around the origin anchor (local (0,0), i.e. props.x/y),
+  // not the visual center, so this deliberately does NOT go through
+  // getElementCenter: it mirrors Phaser's own transform exactly.
+  getRotatedCorners(element) {
+    const { x, y, width, height, rotation } = element.props
+    const { originX, originY } = this.getEffectiveOrigin(element)
+    const rad = Phaser.Math.DegToRad(rotation ?? 0)
+    const cos = Math.cos(rad)
+    const sin = Math.sin(rad)
+    const localCorners = [
+      { x: -originX * width, y: -originY * height },
+      { x: (1 - originX) * width, y: -originY * height },
+      { x: (1 - originX) * width, y: (1 - originY) * height },
+      { x: -originX * width, y: (1 - originY) * height },
+    ]
+    return localCorners.map((corner) => ({
+      x: x + corner.x * cos - corner.y * sin,
+      y: y + corner.x * sin + corner.y * cos,
+    }))
+  }
+
   // Resizes the whole selection so the dragged corner follows the pointer
   // while the opposite corner (captured on dragstart) stays fixed. With one
   // selected element this just resizes it directly; with several, every
@@ -2688,6 +2859,8 @@ export class EditorScene extends Phaser.Scene {
       this.radiusHandle.input.enabled = false
       this.linkHandle.setVisible(false)
       this.linkHandle.input.enabled = false
+      this.rotateHandle.setVisible(false)
+      this.rotateHandle.input.enabled = false
       return
     }
 
@@ -2698,6 +2871,8 @@ export class EditorScene extends Phaser.Scene {
       this.radiusHandle.input.enabled = false
       this.linkHandle.setVisible(false)
       this.linkHandle.input.enabled = false
+      this.rotateHandle.setVisible(false)
+      this.rotateHandle.input.enabled = false
       return
     }
 
@@ -2713,14 +2888,46 @@ export class EditorScene extends Phaser.Scene {
     }
 
     const groupBounds = this.getBoundsUnion(selected)
-    this.selectionGraphics.strokeRect(
-      groupBounds.left,
-      groupBounds.top,
-      groupBounds.width,
-      groupBounds.height,
-    )
+    // A single selected element that can be rotated gets its own outline
+    // drawn as its real (rotated) quad rather than the group's axis-
+    // aligned bounding box — at rotation 0 the two coincide exactly, so
+    // this is never a visual change for an unrotated shape. Multi-select
+    // stays axis-aligned regardless (a rotated group outline is future
+    // work, not needed for editing one shape at a time).
+    const singleRotatable = selected.length === 1 && 'rotation' in selected[0].props
+    if (singleRotatable) {
+      const corners = this.getRotatedCorners(selected[0])
+      this.selectionGraphics.strokePoints(corners, true)
+    } else {
+      this.selectionGraphics.strokeRect(
+        groupBounds.left,
+        groupBounds.top,
+        groupBounds.width,
+        groupBounds.height,
+      )
+    }
     this.positionHandles(groupBounds)
     this.setHandlesVisible(true)
+
+    if (singleRotatable) {
+      const corners = this.getRotatedCorners(selected[0])
+      // The rotate handle sits diagonally outside the shape's own top-
+      // right corner (corners[1], see getRotatedCorners' own ordering),
+      // offset along the same direction the top-right resize handle
+      // already sits relative to the top-left one — rotated by the
+      // shape's own angle so it always reads as "outside that corner"
+      // regardless of orientation, rather than drifting off to a fixed
+      // world-space direction as the shape spins.
+      const rad = Phaser.Math.DegToRad(selected[0].props.rotation ?? 0)
+      const offsetX = ROTATE_HANDLE_OFFSET * (Math.cos(rad) - Math.sin(rad))
+      const offsetY = ROTATE_HANDLE_OFFSET * (Math.sin(rad) + Math.cos(rad))
+      this.rotateHandle.setPosition(corners[1].x + offsetX, corners[1].y + offsetY)
+      this.rotateHandle.setVisible(true)
+      this.rotateHandle.input.enabled = true
+    } else {
+      this.rotateHandle.setVisible(false)
+      this.rotateHandle.input.enabled = false
+    }
 
     // Only for a single top-level selection — linking is always FROM one
     // specific element, so a multi-selection (or a grouped child, which
