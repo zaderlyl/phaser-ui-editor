@@ -869,6 +869,54 @@ export class EditorScene extends Phaser.Scene {
     this.events.emit('selectionchange', this.getSelectionSnapshot())
   }
 
+  // "Contour en tracé" — converts a single shape into an equivalent Tracé
+  // whose points sit exactly on its current (already-rotated) outline, so
+  // a créa can then edit those points by hand the way the pen tool's own
+  // node-edit mode already allows for a Tracé/Polygone. Same eligibility
+  // gate as the boolean ops (a component needs its own toPolygonPoints to
+  // have an "outline" at all) minus Tracé itself, which is already exactly
+  // this. Reuses toPolygonPoints rather than any new geometry: the visual
+  // result is identical to the original shape, just now stored as an
+  // editable point list instead of whatever native Phaser primitive it
+  // was — same normalized-unit-box conversion finishDrawingPath/the
+  // boolean ops already use. Preserves the original's own color/contour so
+  // nothing changes on screen except that it's now a Tracé.
+  convertToPath() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 1) return
+    const element = selected[0]
+    if (element.type === 'path') return
+
+    const definition = componentLibrary.find((component) => component.type === element.type)
+    if (typeof definition?.toPolygonPoints !== 'function') return
+
+    const worldPoints = definition.toPolygonPoints(element)
+    const left = Math.min(...worldPoints.map((point) => point.x))
+    const right = Math.max(...worldPoints.map((point) => point.x))
+    const top = Math.min(...worldPoints.map((point) => point.y))
+    const bottom = Math.max(...worldPoints.map((point) => point.y))
+    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    const points = worldPoints.map((point) => ({
+      x: (point.x - left) / width,
+      y: (point.y - top) / height,
+    }))
+    // Panel/Ligne have no strokeColor/strokeThickness of their own (a
+    // Panel is a flat fill, no contour concept) — only copied over when
+    // the source actually declares them, so path.js's own defaults (a
+    // 0-thickness stroke) apply instead of smuggling in an `undefined`
+    // that would override them and break setStrokeStyle.
+    const carriedProps = { color: element.props.color }
+    if ('strokeColor' in element.props) carriedProps.strokeColor = element.props.strokeColor
+    if ('strokeThickness' in element.props) carriedProps.strokeThickness = element.props.strokeThickness
+
+    this.removeElementInternal(element.id)
+    const created = this.addElement('path', { x: left, y: top, width, height, points, ...carriedProps })
+    this.selectElement(created.id)
+  }
+
   // Union (Pathfinder-style boolean op, see booleanOps.js) — merges
   // exactly 2 selected top-level shapes into a single new Tracé replacing
   // both. Only shapes that declare their own toPolygonPoints (Panel,
@@ -1051,6 +1099,51 @@ export class EditorScene extends Phaser.Scene {
 
     // Same single-history-step bookkeeping as subtractSelected/
     // intersectSelected — see subtractSelected's own note.
+    const created = this.createPathsFromResults(resultsPoints)
+    this.reindexDepths()
+    this.selectedIds = new Set(created.map((element) => element.id))
+    this.drawSelection()
+    this.commitHistory()
+    this.events.emit('selectionchange', this.getSelectionSnapshot())
+  }
+
+  // Diviser (Pathfinder-style boolean op) — splits the 2 selected shapes
+  // into every distinct region their outlines carve out: what's only in A,
+  // what's only in B, and what's shared by both. Unlike Union/Soustraction/
+  // Intersection/Exclusion, polygon-clipping has no single primitive for
+  // this — it's built here from the same 3 pairwise ops those already use
+  // (subtract twice, plus intersect once), each one already handling the
+  // 0-or-1-or-several-pieces case on its own; concatenating their results
+  // is exactly "every resulting region", up to 3 pieces total (or fewer if
+  // the shapes don't overlap: one of the subtracts degenerates to a no-op
+  // copy and the intersection comes back empty). Order-independent, same
+  // as Intersection/Exclusion.
+  divideSelected() {
+    const selected = this.elements.filter(
+      (element) => this.selectedIds.has(element.id) && !element.parentId,
+    )
+    if (selected.length !== 2) return
+
+    const definitions = selected.map((element) =>
+      componentLibrary.find((component) => component.type === element.type),
+    )
+    if (definitions.some((definition) => typeof definition?.toPolygonPoints !== 'function')) return
+
+    const [pointsA, pointsB] = selected.map((element, index) =>
+      definitions[index].toPolygonPoints(element),
+    )
+    const resultsPoints = [
+      ...subtractPolygons(pointsA, pointsB),
+      ...subtractPolygons(pointsB, pointsA),
+      ...intersectPolygons(pointsA, pointsB),
+    ]
+
+    for (const element of selected) {
+      this.removeElementInternal(element.id)
+    }
+
+    // Same single-history-step bookkeeping as Soustraction/Intersection/
+    // Exclusion — see subtractSelected's own note.
     const created = this.createPathsFromResults(resultsPoints)
     this.reindexDepths()
     this.selectedIds = new Set(created.map((element) => element.id))
