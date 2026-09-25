@@ -20,6 +20,14 @@ const IDENTIFIER_PATTERN = /^[A-Za-z_$][A-Za-z0-9_$]*$/
 // actually catch an intended alignment.
 const SNAP_THRESHOLD = 6
 const SNAP_GUIDE_COLOR = 0xff2fd6
+// How close (world pixels) a pen-tool click needs to land next to the
+// path's own first point before it counts as "close the path" instead of
+// placing another point — bigger than SNAP_THRESHOLD since a placed point
+// is small and precisely re-clicking it is harder than aligning an edge.
+const CLOSE_PATH_THRESHOLD = 12
+// Fewest points a pen-tool path needs before it's a real shape — closing
+// (or finishing) with fewer than this just cancels instead.
+const MIN_PATH_POINTS = 3
 // How many undo steps to keep — old enough entries just fall off rather
 // than growing the stack forever.
 const MAX_HISTORY = 100
@@ -69,6 +77,7 @@ export class EditorScene extends Phaser.Scene {
     // "place a point here", never "select whatever's under the cursor".
     this.isDrawingPath = false
     this.pathPoints = []
+    this.lastPathClickTime = 0
   }
 
   create() {
@@ -597,6 +606,23 @@ export class EditorScene extends Phaser.Scene {
       event.preventDefault()
       this.duplicateSelected()
     })
+
+    // Pen tool: Enter finishes the path where it stands, Escape discards
+    // it — both only meaningful while actually drawing (see
+    // startDrawingPath), so they're a no-op the rest of the time rather
+    // than fighting whatever else Enter/Escape might otherwise do.
+    this.input.keyboard.on('keydown-ENTER', (event) => {
+      if (!this.isDrawingPath) return
+      const target = event.target
+      if (target && ['INPUT', 'TEXTAREA'].includes(target.tagName)) return
+      event.preventDefault()
+      this.finishDrawingPath()
+    })
+    this.input.keyboard.on('keydown-ESC', (event) => {
+      if (!this.isDrawingPath) return
+      event.preventDefault()
+      this.cancelDrawingPath()
+    })
   }
 
   // setInteractive({ useHandCursor: true }) with no explicit hitArea makes
@@ -812,9 +838,81 @@ export class EditorScene extends Phaser.Scene {
   // once the path is finished (its bounding box isn't known until every
   // point has been placed), so raw world coordinates are kept here in the
   // meantime.
+  // Two ways a click finishes the path instead of just extending it —
+  // both only once there are enough points for the result to be a real
+  // shape (see MIN_PATH_POINTS):
+  //  - clicking within CLOSE_PATH_THRESHOLD of the very first point
+  //    (the classic "click back on your starting point" pen-tool gesture)
+  //  - a double-click anywhere: its first click already lands as an
+  //    ordinary point (below) as it happens, then this same handler sees
+  //    the second click arrive within 300ms and finishes right there
+  //    instead of adding yet another point for it.
   addPathPoint(pointer) {
-    this.pathPoints.push({ x: pointer.worldX, y: pointer.worldY })
-    this.redrawPathPreview(pointer.worldX, pointer.worldY)
+    const now = performance.now()
+    const isDoubleClick = now - this.lastPathClickTime < 300
+    this.lastPathClickTime = now
+
+    if (isDoubleClick && this.pathPoints.length >= MIN_PATH_POINTS) {
+      this.finishDrawingPath()
+      return
+    }
+
+    const point = { x: pointer.worldX, y: pointer.worldY }
+    if (this.pathPoints.length >= MIN_PATH_POINTS) {
+      const first = this.pathPoints[0]
+      const distance = Phaser.Math.Distance.Between(point.x, point.y, first.x, first.y)
+      if (distance < CLOSE_PATH_THRESHOLD) {
+        this.finishDrawingPath()
+        return
+      }
+    }
+
+    this.pathPoints.push(point)
+    this.redrawPathPreview(point.x, point.y)
+  }
+
+  // Enter, closing near the start point, and a double-click (see
+  // addPathPoint) all end up here — every ending this step supports
+  // produces a *closed* shape; a genuinely open, unfilled stroke would
+  // need Phaser.GameObjects.Graphics instead of the Polygon path.js
+  // builds on, deliberately deferred rather than taken on inside this
+  // same step (see path.js's own note on why only closed paths exist
+  // right now). Too few points to be a real shape just cancels instead —
+  // same as pressing Escape.
+  finishDrawingPath() {
+    if (this.pathPoints.length < MIN_PATH_POINTS) {
+      this.cancelDrawingPath()
+      return
+    }
+
+    const left = Math.min(...this.pathPoints.map((point) => point.x))
+    const right = Math.max(...this.pathPoints.map((point) => point.x))
+    const top = Math.min(...this.pathPoints.map((point) => point.y))
+    const bottom = Math.max(...this.pathPoints.map((point) => point.y))
+    const width = Math.max(MIN_ELEMENT_SIZE, right - left)
+    const height = Math.max(MIN_ELEMENT_SIZE, bottom - top)
+    // Normalized to the 0..1 unit box path.js's own props expect (see its
+    // buildPathPoints) — the bounding box isn't known until every point
+    // has been placed, so raw world coordinates were kept until now.
+    const points = this.pathPoints.map((point) => ({
+      x: (point.x - left) / width,
+      y: (point.y - top) / height,
+    }))
+
+    this.isDrawingPath = false
+    this.pathPoints = []
+    this.pathDrawGraphics.clear()
+
+    const element = this.addElement('path', { x: left, y: top, width, height, points })
+    this.selectElement(element.id)
+  }
+
+  // Escape, or finishing with too few points — discards whatever was
+  // placed so far without creating anything.
+  cancelDrawingPath() {
+    this.isDrawingPath = false
+    this.pathPoints = []
+    this.pathDrawGraphics.clear()
   }
 
   // Solid lines between every placed point, a lighter "rubber band"
