@@ -5,6 +5,7 @@ import { LayersPanel } from './editor/layers/LayersPanel'
 import { PropertiesPanel } from './editor/properties/PropertiesPanel'
 import { ExportModal } from './editor/export/ExportModal'
 import { StatePreviewModal } from './editor/preview/StatePreviewModal'
+import { ScreenPreviewModal } from './editor/preview/ScreenPreviewModal'
 import './App.css'
 
 function App() {
@@ -13,6 +14,7 @@ function App() {
   const [selectedElements, setSelectedElements] = useState([])
   const [elements, setElements] = useState([])
   const [isExportOpen, setExportOpen] = useState(false)
+  const [isScreenPreviewOpen, setScreenPreviewOpen] = useState(false)
   // The specific element to preview, snapshotted at the moment "Aperçu
   // des états" was clicked — not just "the current selection", since the
   // selection could change while the modal stays open.
@@ -188,6 +190,9 @@ function App() {
           >
             Historique {historyState.undoCount}/{historyState.maxEntries}
           </span>
+          <button type="button" className="app-header__export" onClick={() => setScreenPreviewOpen(true)}>
+            Aperçu
+          </button>
           <button type="button" className="app-header__export" onClick={() => setExportOpen(true)}>
             Exporter
           </button>
@@ -244,6 +249,9 @@ function App() {
       </div>
 
       {isExportOpen && <ExportModal elements={elements} onClose={() => setExportOpen(false)} />}
+      {isScreenPreviewOpen && (
+        <ScreenPreviewModal elements={elements} onClose={() => setScreenPreviewOpen(false)} />
+      )}
       {previewElement && (
         <StatePreviewModal
           element={previewElement}
