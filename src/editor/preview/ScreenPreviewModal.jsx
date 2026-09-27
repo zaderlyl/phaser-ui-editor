@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import Phaser from 'phaser'
 import { generateScreenClass } from '../codegen/generateScreenClass'
 import { DEFAULT_RESOLUTION } from '../config'
@@ -34,11 +34,15 @@ function getImageButtonAssetIssue(elements) {
 
 export function ScreenPreviewModal({ elements, onClose }) {
   const containerRef = useRef(null)
-  const [error, setError] = useState('')
+  const [loadError, setLoadError] = useState(null)
   const assetIssue = getImageButtonAssetIssue(elements)
+  const error = assetIssue || (loadError?.elements === elements ? loadError.message : '')
+  const reportError = useCallback(
+    (message) => setLoadError({ elements, message }),
+    [elements],
+  )
 
   useEffect(() => {
-    setError(assetIssue)
     if (assetIssue) return undefined
 
     let game
@@ -54,7 +58,7 @@ export function ScreenPreviewModal({ elements, onClose }) {
         scene: {
           create() {
             this.textures.on('onerror', (key) => {
-              setError(`Phaser n’a pas pu charger l’image « ${key} ».`)
+              reportError(`Phaser n’a pas pu charger l’image « ${key} ».`)
             })
             const screen = new Screen(this)
             screen.open()
@@ -62,11 +66,11 @@ export function ScreenPreviewModal({ elements, onClose }) {
         },
       })
     } catch (thrown) {
-      setError(thrown instanceof Error ? thrown.message : String(thrown))
+      queueMicrotask(() => reportError(thrown instanceof Error ? thrown.message : String(thrown)))
     }
 
     return () => game?.destroy(true)
-  }, [elements, assetIssue])
+  }, [elements, assetIssue, reportError])
 
   return (
     <div className="screen-preview__backdrop" onClick={onClose}>

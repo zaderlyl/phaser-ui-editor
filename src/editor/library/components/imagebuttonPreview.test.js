@@ -2,9 +2,25 @@ import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
 import { generateScreenClass } from '../../codegen/generateScreenClass'
 
+class MockRectangle {
+  constructor(x, y, width, height) { this.setTo(x, y, width, height) }
+  setTo(x, y, width, height) { Object.assign(this, { x, y, width, height }); return this }
+  contains(x, y) { return x >= this.x && y >= this.y && x < this.x + this.width && y < this.y + this.height }
+}
+
+function dimensionsFor(texture = '') {
+  if (texture.endsWith('-hover')) return [320, 180]
+  if (texture.endsWith('-pressed')) return [960, 540]
+  return [640, 360]
+}
+
 class MockGameObject extends EventEmitter {
-  constructor() {
+  constructor(texture) {
     super()
+    this.texture = texture
+    const [width, height] = dimensionsFor(texture)
+    this.width = width
+    this.height = height
     this.displaySize = null
   }
 
@@ -13,12 +29,22 @@ class MockGameObject extends EventEmitter {
     return this
   }
 
-  setOrigin() { return this }
-  setInteractive(options) { this.interactiveOptions = options; return this }
+  setOrigin(x, y) { this.originX = x; this.originY = y; return this }
+  setInteractive(options) {
+    this.interactiveOptions = options
+    this.input = { hitArea: new MockRectangle(0, 0, this.width, this.height) }
+    return this
+  }
   setScrollFactor() { return this }
   setDepth() { return this }
   setVisible(visible) { this.visible = visible; return this }
-  setTexture(texture) { this.texture = texture; return this }
+  setTexture(texture) {
+    this.texture = texture
+    const [width, height] = dimensionsFor(texture)
+    this.width = width
+    this.height = height
+    return this
+  }
 }
 
 class MockContainer extends MockGameObject {
@@ -72,13 +98,30 @@ async function createGeneratedScreen(elements) {
   const scene = {
     textures,
     add: {
-      image: (_x, _y, texture) => Object.assign(new MockGameObject(), { texture }),
+      image: (_x, _y, texture) => new MockGameObject(texture),
       existing: vi.fn(),
     },
   }
   const screen = new Screen(scene)
   await new Promise((resolve) => setTimeout(resolve, 10))
   return screen
+}
+
+function expectWholeSurfaceHitArea(button) {
+  const [displayWidth, displayHeight] = button.displaySize
+  const scaleX = displayWidth / button.width
+  const scaleY = displayHeight / button.height
+  const left = (button.input.hitArea.x - button.width * button.originX) * scaleX
+  const right = (button.input.hitArea.x + button.input.hitArea.width - button.width * button.originX) * scaleX
+  const top = (button.input.hitArea.y - button.height * button.originY) * scaleY
+  const bottom = (button.input.hitArea.y + button.input.hitArea.height - button.height * button.originY) * scaleY
+
+  expect(button.input.hitArea.width).toBe(button.width)
+  expect(button.input.hitArea.height).toBe(button.height)
+  expect([left, right]).toEqual([-displayWidth / 2, displayWidth / 2])
+  expect([top, bottom]).toEqual([-displayHeight / 2, displayHeight / 2])
+  expect(button.input.hitArea.contains(0.5, 0.5)).toBe(true)
+  expect(button.input.hitArea.contains(button.width - 0.5, button.height - 0.5)).toBe(true)
 }
 
 describe('generated ImageButton preview', () => {
@@ -89,8 +132,11 @@ describe('generated ImageButton preview', () => {
     const hover = vi.spyOn(screen, 'playHover')
     const hoverOut = vi.spyOn(screen, 'playHoverOut')
 
+    expectWholeSurfaceHitArea(button)
     button.emit('pointerover')
+    expectWholeSurfaceHitArea(button)
     button.emit('pointerdown')
+    expectWholeSurfaceHitArea(button)
     expect(button.texture).toBe('play-pressed')
     button.emit('pointerout')
     expect(button.texture).toBe('play-normal')
@@ -104,11 +150,13 @@ describe('generated ImageButton preview', () => {
     expect(button.texture).toBe('play-pressed')
 
     button.emit('pointerup')
+    expectWholeSurfaceHitArea(button)
     expect(button.texture).toBe('play-hover')
     expect(click).toHaveBeenCalledOnce()
     expect(button.displaySize).toEqual([160, 60])
 
     button.emit('pointerout')
+    expectWholeSurfaceHitArea(button)
     expect(button.texture).toBe('play-normal')
     expect(hoverOut).toHaveBeenCalledTimes(2)
   })
@@ -121,10 +169,13 @@ describe('generated ImageButton preview', () => {
     expect(screen.children).toContain(screen.menu)
     expect(screen.menu.children).toContain(screen.start)
     screen.start.emit('pointerover')
+    expectWholeSurfaceHitArea(screen.start)
     expect(screen.start.texture).toBe('start-hover')
     screen.start.emit('pointerdown')
+    expectWholeSurfaceHitArea(screen.start)
     expect(screen.start.texture).toBe('start-pressed')
     screen.start.emit('pointerout')
+    expectWholeSurfaceHitArea(screen.start)
     expect(screen.start.texture).toBe('start-normal')
   })
 })

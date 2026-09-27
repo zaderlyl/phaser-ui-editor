@@ -117,12 +117,18 @@ function generateCode(element, containerRef = 'this') {
   const w = Math.round(width)
   const h = Math.round(height)
   const restingTextureKey = hoverTextureKey || textureKey
+  // setTexture() updates an Image's native width/height, but Phaser keeps
+  // the hit-area rectangle created by the initial normal texture. If the
+  // state images have different source dimensions, refresh that rectangle
+  // after every swap so it continues covering the full displayed button.
+  const setTextureAndHitArea = (key) =>
+    `this.${name}.setTexture('${key}').setDisplaySize(${w}, ${h}); this.${name}.input.hitArea.setTo(0, 0, this.${name}.width, this.${name}.height);`
 
   const lines = [
     `scene.textures.once('addtexture-${textureKey}', () => {`,
     `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${w}, ${h}).setOrigin(${originX}, ${originY});`,
     `  this.${name}.setInteractive({ useHandCursor: true });`,
-    `  this.${name}.on('pointerup', () => { this.${name}.setTexture('${restingTextureKey}').setDisplaySize(${w}, ${h}); this.${callback}(); });`,
+    `  this.${name}.on('pointerup', () => { ${setTextureAndHitArea(restingTextureKey)} this.${callback}(); });`,
   ]
 
   if (hoverTextureKey) {
@@ -130,8 +136,8 @@ function generateCode(element, containerRef = 'this') {
     const outCall = hoverOutCallback ? ` this.${hoverOutCallback}();` : ''
     lines.push(
       `  scene.textures.once('addtexture-${hoverTextureKey}', () => {`,
-      `    this.${name}.on('pointerover', () => { this.${name}.setTexture('${hoverTextureKey}').setDisplaySize(${w}, ${h});${overCall} });`,
-      `    this.${name}.on('pointerout', () => { this.${name}.setTexture('${textureKey}').setDisplaySize(${w}, ${h});${outCall} });`,
+      `    this.${name}.on('pointerover', () => { ${setTextureAndHitArea(hoverTextureKey)}${overCall} });`,
+      `    this.${name}.on('pointerout', () => { ${setTextureAndHitArea(textureKey)}${outCall} });`,
       `  });`,
       `  scene.textures.addBase64('${hoverTextureKey}', '${escapeForLiteral(hoverImageData)}');`,
     )
@@ -143,7 +149,7 @@ function generateCode(element, containerRef = 'this') {
   if (pressedTextureKey) {
     lines.push(
       `  scene.textures.once('addtexture-${pressedTextureKey}', () => {`,
-      `    this.${name}.on('pointerdown', () => this.${name}.setTexture('${pressedTextureKey}').setDisplaySize(${w}, ${h}));`,
+      `    this.${name}.on('pointerdown', () => { ${setTextureAndHitArea(pressedTextureKey)} });`,
       `  });`,
       `  scene.textures.addBase64('${pressedTextureKey}', '${escapeForLiteral(pressedImageData)}');`,
     )
