@@ -11,11 +11,36 @@ function buildScreenClass(elements) {
   return new Function('Phaser', `${source}\nreturn Screen`)(Phaser)
 }
 
+function getImageButtonAssetIssue(elements) {
+  const states = [
+    ['normal', 'imageData', 'Normal'],
+    ['hover', 'hoverImageData', 'Survol'],
+    ['pressed', 'pressedImageData', 'Appui'],
+  ]
+
+  for (const element of elements) {
+    if (element.type !== 'imagebutton') continue
+    for (const [keyProp, dataProp, label] of states) {
+      const key = element.props[keyProp === 'normal' ? 'textureKey' : `${keyProp}TextureKey`]
+      const data = element.props[dataProp]
+      if ((key && !data) || (keyProp === 'normal' && !key)) {
+        return `Image ${label} manquante ou invalide pour « ${element.props.name} ».`
+      }
+    }
+  }
+
+  return ''
+}
+
 export function ScreenPreviewModal({ elements, onClose }) {
   const containerRef = useRef(null)
   const [error, setError] = useState('')
+  const assetIssue = getImageButtonAssetIssue(elements)
 
   useEffect(() => {
+    setError(assetIssue)
+    if (assetIssue) return undefined
+
     let game
     try {
       const Screen = buildScreenClass(elements)
@@ -28,6 +53,9 @@ export function ScreenPreviewModal({ elements, onClose }) {
         scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
         scene: {
           create() {
+            this.textures.on('onerror', (key) => {
+              setError(`Phaser n’a pas pu charger l’image « ${key} ».`)
+            })
             const screen = new Screen(this)
             screen.open()
           },
@@ -38,7 +66,7 @@ export function ScreenPreviewModal({ elements, onClose }) {
     }
 
     return () => game?.destroy(true)
-  }, [elements])
+  }, [elements, assetIssue])
 
   return (
     <div className="screen-preview__backdrop" onClick={onClose}>
@@ -54,11 +82,8 @@ export function ScreenPreviewModal({ elements, onClose }) {
           <span>Aperçu de l’écran</span>
           <button type="button" className="screen-preview__close" onClick={onClose} aria-label="Fermer">×</button>
         </header>
-        {error ? (
-          <p className="screen-preview__error">Aperçu impossible : {error}</p>
-        ) : (
-          <div ref={containerRef} className="screen-preview__canvas" />
-        )}
+        <div ref={containerRef} className="screen-preview__canvas" />
+        {error && <p className="screen-preview__error" role="alert">Aperçu impossible : {error}</p>}
         <p className="screen-preview__note">Les boutons sont interactifs. Leurs callbacks sont des stubs en attente de logique métier.</p>
       </section>
     </div>

@@ -119,7 +119,6 @@ function generateCode(element, containerRef = 'this') {
   const restingTextureKey = hoverTextureKey || textureKey
 
   const lines = [
-    `scene.textures.addBase64('${textureKey}', '${escapeForLiteral(imageData)}');`,
     `scene.textures.once('addtexture-${textureKey}', () => {`,
     `  this.${name} = scene.add.image(${Math.round(x)}, ${Math.round(y)}, '${textureKey}').setDisplaySize(${w}, ${h}).setOrigin(${originX}, ${originY});`,
     `  this.${name}.setInteractive({ useHandCursor: true });`,
@@ -130,11 +129,11 @@ function generateCode(element, containerRef = 'this') {
     const overCall = hoverCallback ? ` this.${hoverCallback}();` : ''
     const outCall = hoverOutCallback ? ` this.${hoverOutCallback}();` : ''
     lines.push(
-      `  scene.textures.addBase64('${hoverTextureKey}', '${escapeForLiteral(hoverImageData)}');`,
       `  scene.textures.once('addtexture-${hoverTextureKey}', () => {`,
       `    this.${name}.on('pointerover', () => { this.${name}.setTexture('${hoverTextureKey}').setDisplaySize(${w}, ${h});${overCall} });`,
       `    this.${name}.on('pointerout', () => { this.${name}.setTexture('${textureKey}').setDisplaySize(${w}, ${h});${outCall} });`,
       `  });`,
+      `  scene.textures.addBase64('${hoverTextureKey}', '${escapeForLiteral(hoverImageData)}');`,
     )
   } else {
     if (hoverCallback) lines.push(`  this.${name}.on('pointerover', () => this.${hoverCallback}());`)
@@ -143,14 +142,18 @@ function generateCode(element, containerRef = 'this') {
 
   if (pressedTextureKey) {
     lines.push(
-      `  scene.textures.addBase64('${pressedTextureKey}', '${escapeForLiteral(pressedImageData)}');`,
       `  scene.textures.once('addtexture-${pressedTextureKey}', () => {`,
       `    this.${name}.on('pointerdown', () => this.${name}.setTexture('${pressedTextureKey}').setDisplaySize(${w}, ${h}));`,
       `  });`,
+      `  scene.textures.addBase64('${pressedTextureKey}', '${escapeForLiteral(pressedImageData)}');`,
     )
   }
 
   lines.push(`  ${containerRef}.add(this.${name});`, `});`)
+  // TextureManager.addBase64() decodes asynchronously. Register the event
+  // listener first so image loads cannot outrun their callbacks (Phaser's
+  // documented usage order for this API).
+  lines.push(`scene.textures.addBase64('${textureKey}', '${escapeForLiteral(imageData)}');`)
 
   return lines.join('\n    ')
 }
